@@ -1,0 +1,19 @@
+fileFormatVersion: 2
+guid: 6bc028ec02208c44a8b8144bea489fe9
+timeCreated: 1495983983
+licenseType: Store
+MonoImporter:
+  serializedVersion: 2
+  defaultReferences: []
+  executionOrder: 0
+  icon: {instanceID: 0}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 91811
+  packageName: AnyUI - Map Your UI On Any 3D Surface
+  packageVersion: 1.7
+  assetPath: Assets/AnyUI/Assets/Scripts/AnyUiMesh.cs
+  uploadId: 293323

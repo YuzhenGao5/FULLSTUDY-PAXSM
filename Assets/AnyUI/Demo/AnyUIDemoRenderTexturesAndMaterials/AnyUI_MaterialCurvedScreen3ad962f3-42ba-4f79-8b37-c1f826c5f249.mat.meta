@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: 8a117ce49cda8be4f97b6bd23309b54e
+NativeFormatImporter:
+  externalObjects: {}
+  mainObjectFileID: 2100000
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 91811
+  packageName: AnyUI - Map Your UI On Any 3D Surface
+  packageVersion: 1.7
+  assetPath: Assets/AnyUI/Demo/AnyUIDemoRenderTexturesAndMaterials/AnyUI_MaterialCurvedScreen3ad962f3-42ba-4f79-8b37-c1f826c5f249.mat
+  uploadId: 293323

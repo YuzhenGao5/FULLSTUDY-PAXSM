@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: 627acc29d73c9514aa0c8892b32f0042
+timeCreated: 1498956012
+licenseType: Store
+DefaultImporter:
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 91811
+  packageName: AnyUI - Map Your UI On Any 3D Surface
+  packageVersion: 1.7
+  assetPath: Assets/AnyUI/Demo/Messages.unity
+  uploadId: 293323

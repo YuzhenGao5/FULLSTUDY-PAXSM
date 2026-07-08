@@ -1,0 +1,17 @@
+fileFormatVersion: 2
+guid: 0043f45aaf39c574cbe019279950b01c
+timeCreated: 1519077800
+licenseType: Store
+NativeFormatImporter:
+  externalObjects: {}
+  mainObjectFileID: 2100000
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 91811
+  packageName: AnyUI - Map Your UI On Any 3D Surface
+  packageVersion: 1.7
+  assetPath: Assets/AnyUI/Demo/Globe/Assets/additive.mat
+  uploadId: 293323

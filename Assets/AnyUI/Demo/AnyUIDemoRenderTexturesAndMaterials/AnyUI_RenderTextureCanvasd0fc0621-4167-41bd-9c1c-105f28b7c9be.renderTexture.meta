@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: 96dc1ee9a92f7a545a240608cc3bed65
+NativeFormatImporter:
+  externalObjects: {}
+  mainObjectFileID: 8400000
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 91811
+  packageName: AnyUI - Map Your UI On Any 3D Surface
+  packageVersion: 1.7
+  assetPath: Assets/AnyUI/Demo/AnyUIDemoRenderTexturesAndMaterials/AnyUI_RenderTextureCanvasd0fc0621-4167-41bd-9c1c-105f28b7c9be.renderTexture
+  uploadId: 293323

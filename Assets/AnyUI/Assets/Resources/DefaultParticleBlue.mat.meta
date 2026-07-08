@@ -1,0 +1,16 @@
+fileFormatVersion: 2
+guid: 19863c569264d8f4396a0f6ba8633a03
+timeCreated: 1498991577
+licenseType: Store
+NativeFormatImporter:
+  mainObjectFileID: -1
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 91811
+  packageName: AnyUI - Map Your UI On Any 3D Surface
+  packageVersion: 1.7
+  assetPath: Assets/AnyUI/Assets/Resources/DefaultParticleBlue.mat
+  uploadId: 293323

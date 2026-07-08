@@ -1,0 +1,17 @@
+fileFormatVersion: 2
+guid: 629c0796c273eed47b5fefe6c3b8982c
+timeCreated: 1516719684
+licenseType: Store
+NativeFormatImporter:
+  externalObjects: {}
+  mainObjectFileID: 2100000
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 91811
+  packageName: AnyUI - Map Your UI On Any 3D Surface
+  packageVersion: 1.7
+  assetPath: Assets/AnyUI/Demo/Globe/Assets/Stand.mat
+  uploadId: 293323

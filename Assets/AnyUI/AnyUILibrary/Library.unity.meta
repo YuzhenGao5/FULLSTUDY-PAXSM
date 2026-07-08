@@ -1,0 +1,16 @@
+fileFormatVersion: 2
+guid: fde9ece9f3a41e04888fd10589134050
+timeCreated: 1527634206
+licenseType: Store
+DefaultImporter:
+  externalObjects: {}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 91811
+  packageName: AnyUI - Map Your UI On Any 3D Surface
+  packageVersion: 1.7
+  assetPath: Assets/AnyUI/AnyUILibrary/Library.unity
+  uploadId: 293323

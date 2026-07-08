@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: 24df5fa0276507e45988572250981470
+NativeFormatImporter:
+  externalObjects: {}
+  mainObjectFileID: 8400000
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 91811
+  packageName: AnyUI - Map Your UI On Any 3D Surface
+  packageVersion: 1.7
+  assetPath: Assets/AnyUI/Demo/AnyUIDemoRenderTexturesAndMaterials/AnyUI_RenderTextureCanvas_AnyUIHemispherefb04ac6f-ceef-41df-8787-36359e51f4d1.renderTexture
+  uploadId: 293323

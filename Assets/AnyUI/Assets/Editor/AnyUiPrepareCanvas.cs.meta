@@ -1,0 +1,19 @@
+fileFormatVersion: 2
+guid: bea62f1ce00f604479f9ab82e695fff8
+timeCreated: 1521896239
+licenseType: Store
+MonoImporter:
+  serializedVersion: 2
+  defaultReferences: []
+  executionOrder: 0
+  icon: {instanceID: 0}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 91811
+  packageName: AnyUI - Map Your UI On Any 3D Surface
+  packageVersion: 1.7
+  assetPath: Assets/AnyUI/Assets/Editor/AnyUiPrepareCanvas.cs
+  uploadId: 293323

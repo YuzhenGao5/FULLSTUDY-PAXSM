@@ -1,0 +1,19 @@
+fileFormatVersion: 2
+guid: eff08afdabf0c7f459e24e14af1a7bb4
+timeCreated: 1496143074
+licenseType: Store
+MonoImporter:
+  serializedVersion: 2
+  defaultReferences: []
+  executionOrder: 0
+  icon: {instanceID: 0}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 91811
+  packageName: AnyUI - Map Your UI On Any 3D Surface
+  packageVersion: 1.7
+  assetPath: Assets/AnyUI/Assets/Scripts/AnyUiCanvas.cs
+  uploadId: 293323

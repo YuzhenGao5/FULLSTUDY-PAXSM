@@ -1,0 +1,16 @@
+fileFormatVersion: 2
+guid: 485456423235c214d988501c771e86eb
+timeCreated: 1498956135
+licenseType: Store
+NativeFormatImporter:
+  mainObjectFileID: 2100000
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 91811
+  packageName: AnyUI - Map Your UI On Any 3D Surface
+  packageVersion: 1.7
+  assetPath: Assets/AnyUI/Assets/Resources/Spiral.mat
+  uploadId: 293323

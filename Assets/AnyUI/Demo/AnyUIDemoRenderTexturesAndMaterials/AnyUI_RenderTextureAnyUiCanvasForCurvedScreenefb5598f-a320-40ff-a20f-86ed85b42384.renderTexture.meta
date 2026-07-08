@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: ff3abd364a0e8844192d7dd978a0ab83
+NativeFormatImporter:
+  externalObjects: {}
+  mainObjectFileID: 8400000
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 91811
+  packageName: AnyUI - Map Your UI On Any 3D Surface
+  packageVersion: 1.7
+  assetPath: Assets/AnyUI/Demo/AnyUIDemoRenderTexturesAndMaterials/AnyUI_RenderTextureAnyUiCanvasForCurvedScreenefb5598f-a320-40ff-a20f-86ed85b42384.renderTexture
+  uploadId: 293323

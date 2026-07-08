@@ -1,0 +1,17 @@
+fileFormatVersion: 2
+guid: 2dfd51e480f928b4dba9278e1f879792
+timeCreated: 1517765141
+licenseType: Store
+ComputeShaderImporter:
+  externalObjects: {}
+  currentAPIMask: 4
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 91811
+  packageName: AnyUI - Map Your UI On Any 3D Surface
+  packageVersion: 1.7
+  assetPath: Assets/AnyUI/Assets/Scripts/Resources/UVToBarycentricComputeShader.compute
+  uploadId: 293323

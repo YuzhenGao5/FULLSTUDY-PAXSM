@@ -1,0 +1,16 @@
+fileFormatVersion: 2
+guid: a6dcdeb3b324ff84cbc087e34e9aaa3e
+timeCreated: 1498991543
+licenseType: Store
+NativeFormatImporter:
+  mainObjectFileID: 2100000
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 91811
+  packageName: AnyUI - Map Your UI On Any 3D Surface
+  packageVersion: 1.7
+  assetPath: Assets/AnyUI/Assets/Resources/DefaultParticleRed.mat
+  uploadId: 293323

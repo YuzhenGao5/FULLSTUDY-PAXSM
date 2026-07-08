@@ -1,0 +1,20 @@
+fileFormatVersion: 2
+guid: 0a990a73ba605e94682c02e36e270db7
+timeCreated: 1530363665
+licenseType: Store
+MonoImporter:
+  externalObjects: {}
+  serializedVersion: 2
+  defaultReferences: []
+  executionOrder: 0
+  icon: {instanceID: 0}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 91811
+  packageName: AnyUI - Map Your UI On Any 3D Surface
+  packageVersion: 1.7
+  assetPath: Assets/AnyUI/Demo/CurvedScreen/CurvedUIDemo.cs
+  uploadId: 293323

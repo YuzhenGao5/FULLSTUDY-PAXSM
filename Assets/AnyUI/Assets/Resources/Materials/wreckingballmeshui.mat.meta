@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: 15bff35ecb750cc4a9161aa1384433fe
+NativeFormatImporter:
+  externalObjects: {}
+  mainObjectFileID: 2100000
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 91811
+  packageName: AnyUI - Map Your UI On Any 3D Surface
+  packageVersion: 1.7
+  assetPath: Assets/AnyUI/Assets/Resources/Materials/wreckingballmeshui.mat
+  uploadId: 293323

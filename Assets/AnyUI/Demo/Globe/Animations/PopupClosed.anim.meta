@@ -1,0 +1,17 @@
+fileFormatVersion: 2
+guid: bcdd506845958fe4687071303af51e5a
+timeCreated: 1518285045
+licenseType: Store
+NativeFormatImporter:
+  externalObjects: {}
+  mainObjectFileID: 7400000
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 91811
+  packageName: AnyUI - Map Your UI On Any 3D Surface
+  packageVersion: 1.7
+  assetPath: Assets/AnyUI/Demo/Globe/Animations/PopupClosed.anim
+  uploadId: 293323

@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: 106290cba03bb8b44a95c7bb86253e8f
+timeCreated: 1496155372
+licenseType: Store
+DefaultImporter:
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 91811
+  packageName: AnyUI - Map Your UI On Any 3D Surface
+  packageVersion: 1.7
+  assetPath: Assets/AnyUI/Demo/CurvedScreen/CurvedScreen.unity
+  uploadId: 293323

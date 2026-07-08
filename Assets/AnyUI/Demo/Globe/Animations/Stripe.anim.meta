@@ -1,0 +1,17 @@
+fileFormatVersion: 2
+guid: 8c31b2780ab52b842920dce2a7b4f3bb
+timeCreated: 1518830925
+licenseType: Store
+NativeFormatImporter:
+  externalObjects: {}
+  mainObjectFileID: 7400000
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 91811
+  packageName: AnyUI - Map Your UI On Any 3D Surface
+  packageVersion: 1.7
+  assetPath: Assets/AnyUI/Demo/Globe/Animations/Stripe.anim
+  uploadId: 293323

@@ -1,0 +1,20 @@
+fileFormatVersion: 2
+guid: 8207cc2980f53194d81b43dfc3d36633
+timeCreated: 1517523852
+licenseType: Store
+MonoImporter:
+  externalObjects: {}
+  serializedVersion: 2
+  defaultReferences: []
+  executionOrder: 0
+  icon: {instanceID: 0}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 91811
+  packageName: AnyUI - Map Your UI On Any 3D Surface
+  packageVersion: 1.7
+  assetPath: Assets/AnyUI/Demo/Globe/Scripts/DragoRotate.cs
+  uploadId: 293323

@@ -1,0 +1,19 @@
+fileFormatVersion: 2
+guid: ae35376966495e5428ac725afbdf0e67
+timeCreated: 1498946533
+licenseType: Store
+MonoImporter:
+  serializedVersion: 2
+  defaultReferences: []
+  executionOrder: 0
+  icon: {instanceID: 0}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 91811
+  packageName: AnyUI - Map Your UI On Any 3D Surface
+  packageVersion: 1.7
+  assetPath: Assets/AnyUI/Assets/Scripts/Wind.cs
+  uploadId: 293323

@@ -1,0 +1,20 @@
+fileFormatVersion: 2
+guid: 0ef3d8679d537fb469617d8191198a0a
+timeCreated: 1522016089
+licenseType: Store
+MonoImporter:
+  externalObjects: {}
+  serializedVersion: 2
+  defaultReferences: []
+  executionOrder: 0
+  icon: {instanceID: 0}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 91811
+  packageName: AnyUI - Map Your UI On Any 3D Surface
+  packageVersion: 1.7
+  assetPath: Assets/AnyUI/Demo/Terrain/Scripts/WriteText.cs
+  uploadId: 293323

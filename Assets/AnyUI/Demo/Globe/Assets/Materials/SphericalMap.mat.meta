@@ -1,0 +1,16 @@
+fileFormatVersion: 2
+guid: 6c8d5c0144924ef419c8d1b56232852b
+timeCreated: 1521204540
+licenseType: Store
+NativeFormatImporter:
+  mainObjectFileID: 2100000
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 91811
+  packageName: AnyUI - Map Your UI On Any 3D Surface
+  packageVersion: 1.7
+  assetPath: Assets/AnyUI/Demo/Globe/Assets/Materials/SphericalMap.mat
+  uploadId: 293323
