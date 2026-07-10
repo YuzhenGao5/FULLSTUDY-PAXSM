@@ -1040,7 +1040,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   participantId: P001
-  randomizeWorkloadBlocks: 1
+  randomizeWorkloadBlocks: 0
   startAutomatically: 1
   writeCsvOnQuit: 1
   outputFolderName: XRWorkloadProbe_Data

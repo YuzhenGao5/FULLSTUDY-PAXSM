@@ -40,14 +40,30 @@ public class XRWorkloadProbeSceneController : MonoBehaviour
         public Vector3 baseScale;
     }
 
+    struct TrialSpec
+    {
+        public string ruleType;
+        public int correctPosition;
+        public int layoutShift;
+
+        public TrialSpec(string ruleType, int correctPosition, int layoutShift)
+        {
+            this.ruleType = ruleType;
+            this.correctPosition = correctPosition;
+            this.layoutShift = layoutShift;
+        }
+    }
+
     class TrialRecord
     {
         public string blockId = "";
         public string targetDimension = "";
         public int presentationOrder;
         public int trialIndex;
+        public string scheduleId = "";
         public string cue = "";
         public string rule = "";
+        public string targetLayout = "";
         public int targetCount;
         public float targetDistance;
         public float targetSize;
@@ -59,6 +75,8 @@ public class XRWorkloadProbeSceneController : MonoBehaviour
         public float decisionRt;
         public bool timeout;
         public bool isCorrect;
+        public bool correctHapticPlayed;
+        public bool correctHapticSuppressed;
         public int correctIndex;
         public int selectedIndex;
         public float pointerPath;
@@ -68,10 +86,16 @@ public class XRWorkloadProbeSceneController : MonoBehaviour
     }
 
     public string participantId = "P001";
-    public bool randomizeWorkloadBlocks = true;
+    public bool randomizeWorkloadBlocks = false;
     public bool startAutomatically = true;
     public bool writeCsvOnQuit = true;
     public string outputFolderName = "XRWorkloadProbe_Data";
+
+    [Header("Feedback Haptics")]
+    public bool enableCorrectHaptics = true;
+    public bool suppressCorrectHapticsInFrustrationBlock = true;
+    [Range(0.05f, 1f)] public float correctHapticAmplitude = 0.45f;
+    [Range(0.02f, 0.4f)] public float correctHapticDuration = 0.08f;
 
     [Header("Comfortable Selection")]
     [Range(4f, 30f)] public float selectionMaxDistance = 18f;
@@ -202,6 +226,7 @@ public class XRWorkloadProbeSceneController : MonoBehaviour
         for (_blockIndex = 0; _blockIndex < runOrder.Count; _blockIndex++)
         {
             _currentProfile = runOrder[_blockIndex];
+            _previousCorrectColor = "blue";
             ShowBlockInstruction(_currentProfile);
             yield return WaitForSecondsOrN(4f);
 
@@ -283,9 +308,11 @@ public class XRWorkloadProbeSceneController : MonoBehaviour
         _trialStartTime = Time.time;
         _lastPointerSampleTime = Time.time;
 
+        TrialSpec spec = GetTrialSpec(profile, trialIndex);
         string rule;
         string cue;
-        SpawnTargets(profile, out _correctIndex, out rule, out cue);
+        string targetLayout;
+        SpawnTargets(profile, spec, out _correctIndex, out rule, out cue, out targetLayout);
 
         _currentTrial = new TrialRecord
         {
@@ -293,8 +320,10 @@ public class XRWorkloadProbeSceneController : MonoBehaviour
             targetDimension = profile.targetTlxDimension,
             presentationOrder = _blockIndex + 1,
             trialIndex = trialIndex + 1,
+            scheduleId = $"{profile.blockId}_T{trialIndex + 1:00}",
             cue = cue,
             rule = rule,
+            targetLayout = targetLayout,
             targetCount = profile.targetCount,
             targetDistance = profile.targetDistance,
             targetSize = profile.targetSize,
@@ -326,16 +355,56 @@ public class XRWorkloadProbeSceneController : MonoBehaviour
             _selectionRayRenderer.enabled = false;
 
         bool isCorrect = !timeout && selectedIndex == _correctIndex;
+        bool correctHapticSuppressed = isCorrect && ShouldSuppressCorrectHaptic(_currentProfile);
+        bool correctHapticPlayed = false;
+        if (isCorrect && !correctHapticSuppressed)
+            correctHapticPlayed = TryPlayRightHandHaptic(correctHapticAmplitude, correctHapticDuration);
+
         _currentTrial.selectionTime = Time.time;
         _currentTrial.decisionRt = Time.time - _currentTrial.cueTime;
         _currentTrial.timeout = timeout;
         _currentTrial.isCorrect = isCorrect;
+        _currentTrial.correctHapticPlayed = correctHapticPlayed;
+        _currentTrial.correctHapticSuppressed = correctHapticSuppressed;
         _currentTrial.selectedIndex = selectedIndex;
         _trialRecords.Add(_currentTrial);
 
         if (_feedbackCoroutine != null)
             StopCoroutine(_feedbackCoroutine);
         _feedbackCoroutine = StartCoroutine(ShowFeedbackDelayed(selectedIndex, isCorrect, timeout, _currentProfile.feedbackDelaySeconds));
+    }
+
+    bool ShouldSuppressCorrectHaptic(ProbeBlockProfile profile)
+    {
+        if (!enableCorrectHaptics)
+            return true;
+        if (profile == null)
+            return false;
+        return suppressCorrectHapticsInFrustrationBlock &&
+               string.Equals(profile.blockId, "frustration_heavy", StringComparison.OrdinalIgnoreCase);
+    }
+
+    bool TryPlayRightHandHaptic(float amplitude, float duration)
+    {
+        if (!enableCorrectHaptics)
+            return false;
+
+        bool played = false;
+        InputDevices.GetDevicesAtXRNode(XRNode.RightHand, _rightHandDevices);
+        for (int i = 0; i < _rightHandDevices.Count; i++)
+        {
+            InputDevice device = _rightHandDevices[i];
+            if (!device.isValid)
+                continue;
+
+            if (device.TryGetHapticCapabilities(out HapticCapabilities caps) &&
+                caps.supportsImpulse &&
+                caps.numChannels > 0)
+            {
+                played = device.SendHapticImpulse(0u, Mathf.Clamp01(amplitude), Mathf.Max(0.01f, duration)) || played;
+            }
+        }
+        return played;
     }
 
     IEnumerator ShowFeedbackDelayed(int selectedIndex, bool isCorrect, bool timeout, float delay)
@@ -365,21 +434,134 @@ public class XRWorkloadProbeSceneController : MonoBehaviour
             _feedbackText.text = $"Incorrect. Selected {GetTargetLabel(selectedIndex)}; target was {GetTargetLabel(_correctIndex)}.";
     }
 
-    void SpawnTargets(ProbeBlockProfile profile, out int correctIndex, out string rule, out string cue)
+    TrialSpec GetTrialSpec(ProbeBlockProfile profile, int trialIndex)
+    {
+        TrialSpec[] schedule = GetPresetSchedule(profile.blockId);
+        if (schedule.Length == 0)
+            return new TrialSpec("direct-color", trialIndex % Mathf.Max(2, profile.targetCount), trialIndex);
+        return schedule[trialIndex % schedule.Length];
+    }
+
+    TrialSpec[] GetPresetSchedule(string blockId)
+    {
+        switch (blockId)
+        {
+            case "baseline":
+                return new[]
+                {
+                    new TrialSpec("direct-color", 0, 0),
+                    new TrialSpec("direct-color", 2, 1),
+                    new TrialSpec("direct-color", 1, 2),
+                    new TrialSpec("direct-color", 3, 3),
+                    new TrialSpec("direct-color", 0, 1),
+                    new TrialSpec("direct-color", 3, 2),
+                    new TrialSpec("direct-color", 2, 0),
+                    new TrialSpec("direct-color", 1, 3)
+                };
+            case "cognitive_heavy":
+                return new[]
+                {
+                    new TrialSpec("direct-color", 1, 0),
+                    new TrialSpec("shape-color", 5, 2),
+                    new TrialSpec("previous-color", 3, 4),
+                    new TrialSpec("shape-color", 0, 1),
+                    new TrialSpec("previous-color", 6, 3),
+                    new TrialSpec("direct-color", 4, 5),
+                    new TrialSpec("shape-color", 2, 0),
+                    new TrialSpec("previous-color", 5, 2),
+                    new TrialSpec("direct-color", 6, 1),
+                    new TrialSpec("previous-color", 1, 4)
+                };
+            case "physical_heavy":
+                return new[]
+                {
+                    new TrialSpec("direct-color", 0, 0),
+                    new TrialSpec("direct-color", 4, 1),
+                    new TrialSpec("direct-color", 1, 2),
+                    new TrialSpec("direct-color", 3, 3),
+                    new TrialSpec("direct-color", 2, 4),
+                    new TrialSpec("direct-color", 0, 2),
+                    new TrialSpec("direct-color", 4, 0),
+                    new TrialSpec("direct-color", 1, 3),
+                    new TrialSpec("direct-color", 3, 1),
+                    new TrialSpec("direct-color", 2, 4)
+                };
+            case "temporal_heavy":
+                return new[]
+                {
+                    new TrialSpec("direct-color", 2, 0),
+                    new TrialSpec("direct-color", 0, 1),
+                    new TrialSpec("direct-color", 4, 2),
+                    new TrialSpec("direct-color", 1, 3),
+                    new TrialSpec("direct-color", 3, 4),
+                    new TrialSpec("direct-color", 2, 1),
+                    new TrialSpec("direct-color", 4, 3),
+                    new TrialSpec("direct-color", 0, 2),
+                    new TrialSpec("direct-color", 3, 0),
+                    new TrialSpec("direct-color", 1, 4)
+                };
+            case "performance_strict":
+                return new[]
+                {
+                    new TrialSpec("direct-color", 0, 0),
+                    new TrialSpec("shape-color", 5, 1),
+                    new TrialSpec("direct-color", 2, 2),
+                    new TrialSpec("shape-color", 4, 3),
+                    new TrialSpec("shape-color", 1, 4),
+                    new TrialSpec("direct-color", 3, 5),
+                    new TrialSpec("direct-color", 5, 2),
+                    new TrialSpec("shape-color", 0, 4),
+                    new TrialSpec("direct-color", 4, 1),
+                    new TrialSpec("shape-color", 2, 3)
+                };
+            case "frustration_heavy":
+                return new[]
+                {
+                    new TrialSpec("direct-color", 1, 0),
+                    new TrialSpec("direct-color", 3, 1),
+                    new TrialSpec("direct-color", 0, 2),
+                    new TrialSpec("direct-color", 4, 3),
+                    new TrialSpec("direct-color", 2, 4),
+                    new TrialSpec("direct-color", 3, 0),
+                    new TrialSpec("direct-color", 1, 2),
+                    new TrialSpec("direct-color", 4, 1),
+                    new TrialSpec("direct-color", 0, 4),
+                    new TrialSpec("direct-color", 2, 3)
+                };
+            case "combined_high":
+                return new[]
+                {
+                    new TrialSpec("direct-color", 0, 0),
+                    new TrialSpec("shape-color", 6, 2),
+                    new TrialSpec("previous-color", 2, 4),
+                    new TrialSpec("direct-color", 5, 1),
+                    new TrialSpec("shape-color", 1, 3),
+                    new TrialSpec("previous-color", 4, 5),
+                    new TrialSpec("shape-color", 3, 0),
+                    new TrialSpec("direct-color", 6, 1),
+                    new TrialSpec("previous-color", 0, 2),
+                    new TrialSpec("shape-color", 5, 4)
+                };
+            default:
+                return Array.Empty<TrialSpec>();
+        }
+    }
+
+    void SpawnTargets(ProbeBlockProfile profile, TrialSpec spec, out int correctIndex, out string rule, out string cue, out string targetLayout)
     {
         int count = Mathf.Clamp(profile.targetCount, 2, _colorNames.Length);
-        int ruleMode = profile.ruleComplexity <= 1 ? 0 : UnityEngine.Random.Range(0, profile.ruleComplexity);
-        correctIndex = UnityEngine.Random.Range(0, count);
+        correctIndex = Mathf.Clamp(spec.correctPosition, 0, count - 1);
+        int[] colorIndices = BuildColorLayout(count, spec.layoutShift);
 
-        string requiredColor = _colorNames[correctIndex];
+        string requiredColor = _colorNames[colorIndices[correctIndex]];
         string requiredShape = _shapeNames[correctIndex % _shapeNames.Length];
 
-        if (ruleMode == 0)
+        if (spec.ruleType == "direct-color")
         {
             rule = "direct-color";
             cue = $"Select the {requiredColor.ToUpperInvariant()} target.";
         }
-        else if (ruleMode == 1)
+        else if (spec.ruleType == "shape-color")
         {
             rule = "shape-color";
             cue = $"Rule: SHAPE + COLOR. Select the {requiredColor.ToUpperInvariant()} {requiredShape.ToUpperInvariant()} target.";
@@ -387,40 +569,90 @@ public class XRWorkloadProbeSceneController : MonoBehaviour
         else
         {
             rule = "previous-color";
-            int previousIndex = Array.IndexOf(_colorNames, _previousCorrectColor);
-            correctIndex = Mathf.Clamp(previousIndex, 0, count - 1);
-            requiredColor = _colorNames[correctIndex];
+            int previousColorIndex = Mathf.Max(0, Array.IndexOf(_colorNames, _previousCorrectColor));
+            correctIndex = EnsureColorInLayout(colorIndices, previousColorIndex, correctIndex);
+            requiredColor = _colorNames[colorIndices[correctIndex]];
+            requiredShape = _shapeNames[correctIndex % _shapeNames.Length];
             cue = $"Rule: MEMORY. Select the previous correct color: {requiredColor.ToUpperInvariant()}.";
         }
 
         _previousCorrectColor = requiredColor;
+        targetLayout = BuildTargetLayoutString(colorIndices, count);
 
-        float height = 1.25f;
+        float tableTopY = 0.76f;
         float visibleWidth = Mathf.Clamp(profile.targetDistance * 1.35f, 2.2f, 4.8f);
-        float targetDepth = Mathf.Clamp(profile.targetDistance, 1.3f, 2.9f);
+        float targetDepth = Mathf.Clamp(profile.targetDistance, 1.45f, 2.35f);
         for (int i = 0; i < count; i++)
         {
             float t = count == 1 ? 0.5f : i / (float)(count - 1);
             float x = Mathf.Lerp(-visibleWidth * 0.5f, visibleWidth * 0.5f, t);
-            Vector3 local = new Vector3(x, height + Mathf.Sin(t * Mathf.PI) * 0.32f, targetDepth);
 
             PrimitiveType primitiveType = ShapeToPrimitive(_shapeNames[i % _shapeNames.Length]);
             GameObject target = GameObject.CreatePrimitive(primitiveType);
-            target.name = $"ProbeTarget_{i + 1}_{_colorNames[i]}_{_shapeNames[i % _shapeNames.Length]}";
+            string colorName = _colorNames[colorIndices[i]];
+            target.name = $"ProbeTarget_{i + 1}_{colorName}_{_shapeNames[i % _shapeNames.Length]}";
             target.transform.SetParent(_targetRoot, false);
-            target.transform.localPosition = local;
             target.transform.localScale = Vector3.one * profile.targetSize;
+            float centerY = tableTopY + GetPrimitiveHalfHeight(primitiveType, profile.targetSize) + 0.015f;
+            target.transform.localPosition = new Vector3(x, centerY, targetDepth);
             var renderer = target.GetComponent<Renderer>();
-            renderer.sharedMaterial = _colorMaterials[_colorNames[i]];
+            renderer.sharedMaterial = _colorMaterials[colorName];
 
             _targets.Add(new TargetInfo
             {
                 gameObject = target,
-                colorName = _colorNames[i],
+                colorName = colorName,
                 shapeName = _shapeNames[i % _shapeNames.Length],
                 baseScale = target.transform.localScale
             });
         }
+    }
+
+    float GetPrimitiveHalfHeight(PrimitiveType primitiveType, float scale)
+    {
+        return primitiveType == PrimitiveType.Capsule ? scale : scale * 0.5f;
+    }
+
+    int[] BuildColorLayout(int count, int layoutShift)
+    {
+        int[] colorIndices = new int[count];
+        for (int i = 0; i < count; i++)
+            colorIndices[i] = PositiveModulo(layoutShift + i, _colorNames.Length);
+        return colorIndices;
+    }
+
+    int EnsureColorInLayout(int[] colorIndices, int colorIndex, int preferredPosition)
+    {
+        for (int i = 0; i < colorIndices.Length; i++)
+        {
+            if (colorIndices[i] == colorIndex)
+                return i;
+        }
+
+        int position = Mathf.Clamp(preferredPosition, 0, colorIndices.Length - 1);
+        colorIndices[position] = colorIndex;
+        return position;
+    }
+
+    int PositiveModulo(int value, int modulo)
+    {
+        return ((value % modulo) + modulo) % modulo;
+    }
+
+    string BuildTargetLayoutString(int[] colorIndices, int count)
+    {
+        var sb = new StringBuilder();
+        for (int i = 0; i < count; i++)
+        {
+            if (i > 0)
+                sb.Append("|");
+            sb.Append(i);
+            sb.Append(":");
+            sb.Append(_colorNames[colorIndices[i]]);
+            sb.Append("/");
+            sb.Append(_shapeNames[i % _shapeNames.Length]);
+        }
+        return sb.ToString();
     }
 
     string GetTargetLabel(int index)
@@ -897,12 +1129,22 @@ public class XRWorkloadProbeSceneController : MonoBehaviour
 
         Material floorMaterial = NewMaterial("ProbeRoomFloor", new Color(0.13f, 0.15f, 0.17f));
         Material wallMaterial = NewMaterial("ProbeRoomWall", new Color(0.08f, 0.10f, 0.12f));
+        Material tableMaterial = NewMaterial("ProbeTable", new Color(0.24f, 0.27f, 0.28f));
+        Material tableEdgeMaterial = NewMaterial("ProbeTableEdge", new Color(0.12f, 0.14f, 0.15f));
 
         FindOrCreateRoomSurface("Probe_Room_Floor", new Vector3(0f, -0.04f, 1.55f), new Vector3(6.4f, 0.06f, 5.6f), floorMaterial);
         FindOrCreateRoomSurface("Probe_Room_BackWall", new Vector3(0f, 1.35f, 4.35f), new Vector3(6.4f, 2.8f, 0.08f), wallMaterial);
         FindOrCreateRoomSurface("Probe_Room_LeftWall", new Vector3(-3.2f, 1.35f, 1.55f), new Vector3(0.08f, 2.8f, 5.6f), wallMaterial);
         FindOrCreateRoomSurface("Probe_Room_RightWall", new Vector3(3.2f, 1.35f, 1.55f), new Vector3(0.08f, 2.8f, 5.6f), wallMaterial);
         FindOrCreateRoomSurface("Probe_Room_FrontWall", new Vector3(0f, 1.35f, -1.25f), new Vector3(6.4f, 2.8f, 0.08f), wallMaterial);
+
+        FindOrCreateRoomSurface("Probe_TableTop", new Vector3(0f, 0.70f, 2.02f), new Vector3(5.65f, 0.12f, 2.25f), tableMaterial);
+        FindOrCreateRoomSurface("Probe_TableFrontEdge", new Vector3(0f, 0.78f, 0.88f), new Vector3(5.75f, 0.08f, 0.08f), tableEdgeMaterial);
+        FindOrCreateRoomSurface("Probe_TableBackEdge", new Vector3(0f, 0.78f, 3.16f), new Vector3(5.75f, 0.08f, 0.08f), tableEdgeMaterial);
+        FindOrCreateRoomSurface("Probe_TableLeftLeg", new Vector3(-2.55f, 0.32f, 1.03f), new Vector3(0.12f, 0.70f, 0.12f), tableEdgeMaterial);
+        FindOrCreateRoomSurface("Probe_TableRightLeg", new Vector3(2.55f, 0.32f, 1.03f), new Vector3(0.12f, 0.70f, 0.12f), tableEdgeMaterial);
+        FindOrCreateRoomSurface("Probe_TableBackLeftLeg", new Vector3(-2.55f, 0.32f, 3.00f), new Vector3(0.12f, 0.70f, 0.12f), tableEdgeMaterial);
+        FindOrCreateRoomSurface("Probe_TableBackRightLeg", new Vector3(2.55f, 0.32f, 3.00f), new Vector3(0.12f, 0.70f, 0.12f), tableEdgeMaterial);
 
         GameObject lightObj = new GameObject("Probe_KeyLight");
         Light light = lightObj.AddComponent<Light>();
@@ -919,8 +1161,8 @@ public class XRWorkloadProbeSceneController : MonoBehaviour
         _titleText = CreateText("Probe_Title", "Probe_TitleAnchor", new Vector3(0f, 2.32f, 4.24f), 0.03f, TextAnchor.MiddleCenter);
         _cueText = CreateText("Probe_Cue", "Probe_CueAnchor", new Vector3(0f, 2.04f, 4.24f), 0.022f, TextAnchor.MiddleCenter);
         _statusText = CreateText("Probe_Status", "Probe_StatusAnchor", new Vector3(-1.85f, 1.72f, 4.24f), 0.017f, TextAnchor.UpperLeft);
-        _timerText = CreateText("Probe_Timer", "Probe_TimerAnchor", new Vector3(2.15f, 2.18f, 4.24f), 0.028f, TextAnchor.MiddleCenter);
-        _feedbackText = CreateText("Probe_Feedback", "Probe_FeedbackAnchor", new Vector3(0f, 1.02f, 4.24f), 0.024f, TextAnchor.MiddleCenter);
+        _timerText = CreateText("Probe_Timer", "Probe_TimerAnchor", new Vector3(0f, 1.72f, 4.24f), 0.038f, TextAnchor.MiddleCenter);
+        _feedbackText = CreateText("Probe_Feedback", "Probe_FeedbackAnchor", new Vector3(0f, 1.18f, 4.24f), 0.024f, TextAnchor.MiddleCenter);
 
         _titleText.color = Color.white;
         _cueText.color = new Color(0.92f, 0.96f, 1f);
@@ -1124,14 +1366,15 @@ public class XRWorkloadProbeSceneController : MonoBehaviour
     string BuildTrialCsv()
     {
         var sb = new StringBuilder();
-        sb.AppendLine("participantId,taskType,blockId,targetDimension,presentationOrder,trialIndex,cue,rule,targetCount,targetDistance,targetSize,timeLimit,feedbackDelay,controlNoise,decisionRt,timeout,isCorrect,correctIndex,selectedIndex,pointerPath,pointerPeakSpeed,pauseCount,hoverChangeCount");
+        sb.AppendLine("participantId,taskType,blockId,targetDimension,presentationOrder,trialIndex,scheduleId,cue,rule,targetLayout,targetCount,targetDistance,targetSize,timeLimit,feedbackDelay,controlNoise,decisionRt,timeout,isCorrect,correctHapticPlayed,correctHapticSuppressed,correctIndex,selectedIndex,pointerPath,pointerPeakSpeed,pauseCount,hoverChangeCount");
         foreach (TrialRecord r in _trialRecords)
         {
             sb.AppendLine(string.Join(",",
                 Csv(participantId), Csv(r.blockId), Csv(r.blockId), Csv(r.targetDimension), r.presentationOrder, r.trialIndex,
-                Csv(r.cue), Csv(r.rule), r.targetCount,
+                Csv(r.scheduleId), Csv(r.cue), Csv(r.rule), Csv(r.targetLayout), r.targetCount,
                 F(r.targetDistance), F(r.targetSize), F(r.timeLimit), F(r.feedbackDelay), F(r.controlNoise),
                 F(r.decisionRt), r.timeout ? "1" : "0", r.isCorrect ? "1" : "0",
+                r.correctHapticPlayed ? "1" : "0", r.correctHapticSuppressed ? "1" : "0",
                 r.correctIndex, r.selectedIndex, F(r.pointerPath), F(r.pointerPeakSpeed),
                 r.pauseCount, r.hoverChangeCount));
         }
