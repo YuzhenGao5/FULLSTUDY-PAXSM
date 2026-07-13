@@ -840,37 +840,6 @@ BoxCollider:
   serializedVersion: 3
   m_Size: {x: 1, y: 1, z: 1}
   m_Center: {x: 0, y: 0, z: 0}
---- !u!1 &450000
-GameObject:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  serializedVersion: 6
-  m_Component:
-  - component: {fileID: 450001}
-  m_Layer: 0
-  m_Name: Probe_TargetAreaCenter
-  m_TagString: Untagged
-  m_Icon: {fileID: 0}
-  m_NavMeshLayer: 0
-  m_StaticEditorFlags: 0
-  m_IsActive: 1
---- !u!4 &450001
-Transform:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 450000}
-  serializedVersion: 2
-  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 0, y: 0, z: 0}
-  m_LocalScale: {x: 1, y: 1, z: 1}
-  m_ConstrainProportionsScale: 0
-  m_Children: []
-  m_Father: {fileID: 0}
-  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &451000
 GameObject:
   m_ObjectHideFlags: 0
@@ -881,7 +850,7 @@ GameObject:
   m_Component:
   - component: {fileID: 451001}
   m_Layer: 0
-  m_Name: Probe_TitleAnchor
+  m_Name: Template_TitleAnchor
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -912,7 +881,7 @@ GameObject:
   m_Component:
   - component: {fileID: 452001}
   m_Layer: 0
-  m_Name: Probe_CueAnchor
+  m_Name: Template_CueAnchor
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -943,7 +912,7 @@ GameObject:
   m_Component:
   - component: {fileID: 453001}
   m_Layer: 0
-  m_Name: Probe_StatusAnchor
+  m_Name: Template_StatusAnchor
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -974,7 +943,7 @@ GameObject:
   m_Component:
   - component: {fileID: 454001}
   m_Layer: 0
-  m_Name: Probe_FeedbackAnchor
+  m_Name: Template_FeedbackAnchor
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -1006,7 +975,7 @@ GameObject:
   - component: {fileID: 100001}
   - component: {fileID: 100002}
   m_Layer: 0
-  m_Name: XR Workload Probe Bootstrap
+  m_Name: PAXSM Empty Template Bootstrap
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -1036,132 +1005,41 @@ MonoBehaviour:
   m_GameObject: {fileID: 100000}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: a7b8c9d0e1f24a5b8c6d7e8f90123456, type: 3}
+  m_Script: {fileID: 11500000, guid: 5d9f1c4a7e8b42f1a3c6d0e9b2f45781, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
   participantId: P001
-  randomizeWorkloadBlocks: 0
   startAutomatically: 1
-  writeCsvOnQuit: 1
-  outputFolderName: XRWorkloadProbe_Data
-  collectQuestionnaireBetweenBlocks: 1
-  useMainSceneKnobRig: 1
-  paxsmKnobRigPrefab: {fileID: 0}
-  questionnaireBankResourcesPath: QuestionBanks/Scale
-  questionnaireKnobDiameterMeters: 0.1
-  questionnaireKnobPosition: {x: 0.38, y: 1.02, z: 0.64}
-  questionnairePanelTiltDegrees: 18
-  questionnaireKnobArcDegrees: 120
-  questionnaireUseHeadRelativePlacement: 1
-  questionnaireForwardOffset: 0.42
-  questionnaireRightOffset: 0.16
-  questionnaireBelowEyeOffset: 0.28
-  questionnaireMinimumHeight: 0.72
-  questionnaireMaximumHeight: 1.45
-  questionnaireGrabRadius: 0.14
-  questionnaireScale: 21
-  questionnaireConfidenceScale: 5
-  collectConfidenceAfterEachItem: 1
-  questionnaireConfirmHoldSeconds: 0.8
-  questionnaireConfirmHapticInterval: 0.08
-  questionnaireConfirmHapticMin: 0.04
-  questionnaireConfirmHapticMax: 0.62
-  blockProfiles:
-  - blockId: baseline
-    displayName: Baseline
-    targetTlxDimension: low workload baseline
-    ruleComplexity: 1
-    targetCount: 4
-    distractorCount: 3
-    targetDistance: 1.35
-    targetSize: 0.26
-    timeLimitSeconds: 0
-    successThresholdStrictness: 0
-    feedbackDelaySeconds: 0
-    controlNoiseDegrees: 0
-    trialsPerBlock: 8
-    rationale: Simple rule, near targets, no time pressure, stable feedback.
-  - blockId: cognitive_heavy
-    displayName: Cognitive-heavy
-    targetTlxDimension: Mental Demand
-    ruleComplexity: 3
-    targetCount: 7
-    distractorCount: 6
-    targetDistance: 1.55
-    targetSize: 0.22
-    timeLimitSeconds: 0
-    successThresholdStrictness: 0
-    feedbackDelaySeconds: 0
-    controlNoiseDegrees: 0
-    trialsPerBlock: 10
-    rationale: Rule switching, memory cue, and distractors should increase attention and working-memory demand.
-  - blockId: physical_heavy
-    displayName: Physical-heavy
-    targetTlxDimension: Physical Demand
-    ruleComplexity: 1
-    targetCount: 5
-    distractorCount: 4
-    targetDistance: 2.65
-    targetSize: 0.18
-    timeLimitSeconds: 0
-    successThresholdStrictness: 0.65
-    feedbackDelaySeconds: 0
-    controlNoiseDegrees: 0
-    trialsPerBlock: 10
-    rationale: Farther and smaller targets should increase reaching/pointing demand.
-  - blockId: temporal_heavy
-    displayName: Temporal-heavy
-    targetTlxDimension: Temporal Demand
-    ruleComplexity: 1
-    targetCount: 5
-    distractorCount: 4
-    targetDistance: 1.55
-    targetSize: 0.22
-    timeLimitSeconds: 2.25
-    successThresholdStrictness: 0
-    feedbackDelaySeconds: 0
-    controlNoiseDegrees: 0
-    trialsPerBlock: 10
-    rationale: Short selection window should increase perceived time pressure.
-  - blockId: performance_strict
-    displayName: Performance-strict
-    targetTlxDimension: Performance
-    ruleComplexity: 2
-    targetCount: 6
-    distractorCount: 5
-    targetDistance: 1.8
-    targetSize: 0.14
-    timeLimitSeconds: 0
-    successThresholdStrictness: 1
-    feedbackDelaySeconds: 0
-    controlNoiseDegrees: 0
-    trialsPerBlock: 10
-    rationale: Small targets and strict success standard should make performance feel harder to maintain.
-  - blockId: frustration_heavy
-    displayName: Frustration-heavy
-    targetTlxDimension: Frustration
-    ruleComplexity: 1
-    targetCount: 5
-    distractorCount: 4
-    targetDistance: 1.55
-    targetSize: 0.2
-    timeLimitSeconds: 0
-    successThresholdStrictness: 0
-    feedbackDelaySeconds: 0.9
-    controlNoiseDegrees: 3.5
-    trialsPerBlock: 10
-    rationale: Delayed feedback and mild control disturbance should create recoverable friction.
-  - blockId: combined_high
-    displayName: Combined-high
-    targetTlxDimension: Effort / overall workload
-    ruleComplexity: 3
-    targetCount: 7
-    distractorCount: 6
-    targetDistance: 2.2
-    targetSize: 0.16
-    timeLimitSeconds: 2.5
-    successThresholdStrictness: 0
-    feedbackDelaySeconds: 0.35
-    controlNoiseDegrees: 1.5
-    trialsPerBlock: 10
-    rationale: Combined cognitive, physical, temporal, and feedback demands should increase perceived effort.
+  blocks:
+  - blockId: block_01
+    displayName: Empty Block 1
+    questionnaireSlots:
+    - slotId: after_block_01
+      displayName: Questionnaire Slot after Block 1
+      insertionPointId: after_block
+      questionnaireId: 
+      questionnaireBankResourcesPath: 
+  - blockId: block_02
+    displayName: Empty Block 2
+    questionnaireSlots:
+    - slotId: after_block_02
+      displayName: Questionnaire Slot after Block 2
+      insertionPointId: after_block
+      questionnaireId: 
+      questionnaireBankResourcesPath: 
+  - blockId: block_03
+    displayName: Empty Block 3
+    questionnaireSlots:
+    - slotId: after_block_03
+      displayName: Questionnaire Slot after Block 3
+      insertionPointId: after_block
+      questionnaireId: 
+      questionnaireBankResourcesPath: 
+  - blockId: block_04
+    displayName: Empty Block 4
+    questionnaireSlots:
+    - slotId: after_block_04
+      displayName: Questionnaire Slot after Block 4
+      insertionPointId: after_block
+      questionnaireId: 
+      questionnaireBankResourcesPath: 

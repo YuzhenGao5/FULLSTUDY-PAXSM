@@ -1,0 +1,14 @@
+{
+  "assumptions": {
+    "two_sided_alpha": 0.05,
+    "target_power": 0.8,
+    "attrition_or_invalid_data_buffer": 0.15,
+    "six_dimension_conservative_alpha": 0.008333333333333333,
+    "pilot_note": "P1-P6 has only six CR/Non-CR pairs; effects are descriptive and not used as the sole recruitment basis."
+  },
+  "planning_recommendation": {
+    "probe_or_combined_participant_study": "A simple paired contrast at dz=0.5 requires 34 complete participants (recruit 40 with 15% loss). Because the planned study includes interactions and mixed-effects analyses, target 40 complete and recruit 47 if resources allow.",
+    "six_nasa_dimensions_as_equal_primary_tests": "Use the conservative corrected table; approximately 60 complete participants may be needed for dz near 0.5. Prefer one primary dimension/contrast and treat others as secondary.",
+    "researcher_review": "Target 30 complete researchers with 6 cases per interface condition only if a 15-percentage-point accuracy improvement (0.65 to 0.80) is the smallest effect of interest. A 10-point improvement needs about 66-72 complete researchers under these assumptions. Run an internal 6-8 researcher pilot and update the simulation."
+  }
+}

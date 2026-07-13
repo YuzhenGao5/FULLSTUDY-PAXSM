@@ -44,6 +44,7 @@ public class KnobCore : MonoBehaviour
     [Header("HighLight 脚本")]
     public OptionHighLight cardsHighLight;
     public SliderTickHighLight sliderHighLight;
+    public bool suppressMissingHighlightWarnings = false;
 
     [Header("旋钮设置")]
     [Tooltip("旋转插值速度（度/秒）")]
@@ -296,6 +297,19 @@ public class KnobCore : MonoBehaviour
         overrideFastMeanMin = Mathf.Max(0f, overrideFastMeanMin);
 
         idleSampleInterval = Mathf.Clamp(idleSampleInterval, 0.01f, 0.5f);
+    }
+
+    public void RuntimeBind(MonoBehaviour runtimeRingBehaviour, Transform runtimeKnob)
+    {
+        ringBehaviour = runtimeRingBehaviour;
+        if (runtimeKnob != null)
+            knob = runtimeKnob;
+        if (!knob)
+            knob = transform;
+
+        baseLocalRotation = knob.localRotation;
+        CacheRing();
+        ValidateRingOrWarn();
     }
 
     void Awake()
@@ -1398,12 +1412,12 @@ public class KnobCore : MonoBehaviour
         if (mode == "slider")
         {
             if (sliderHighLight != null) sliderHighLight.ConfirmCurrentSelection();
-            else Debug.LogWarning("[KnobCore] default_mode=slider 但 sliderHighLight 为空");
+            else if (!suppressMissingHighlightWarnings) Debug.LogWarning("[KnobCore] default_mode=slider 但 sliderHighLight 为空");
         }
         else
         {
             if (cardsHighLight != null) cardsHighLight.ConfirmCurrentSelection();
-            else Debug.LogWarning("[KnobCore] default_mode=cards 但 cardsHighLight 为空");
+            else if (!suppressMissingHighlightWarnings) Debug.LogWarning("[KnobCore] default_mode=cards 但 cardsHighLight 为空");
         }
 
         OnConfirmed?.Invoke(human);
