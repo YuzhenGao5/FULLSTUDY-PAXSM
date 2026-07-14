@@ -15,6 +15,7 @@ public class XRWorkloadProbeSceneController : MonoBehaviour
 {
     const float RuntimeQuestionnaireKnobDiameterMeters = 0.10f;
     const string QuestionnaireSchemaVersion = "CAREXR_Questionnaire_v2.0";
+    const string QuestionnaireSpeedSchemaVersion = "CAREXR_QuestionnaireSpeed_v1.0";
 
     [Serializable]
     public class ProbeBlockProfile
@@ -140,6 +141,17 @@ public class XRWorkloadProbeSceneController : MonoBehaviour
         public int lastDirection;
         public float lastSlotChangeTime;
         public bool pauseCountedForCurrentDwell;
+        public int activeGrabIndex;
+        public bool hasSlotSpeedBaseline;
+        public int slotSpeedBaselineSlot = -1;
+        public float slotSpeedBaselineTime;
+        public bool hasPhysicalSpeedBaseline;
+        public float lastPhysicalSpeedSampleTime;
+        public float lastPhysicalTwistDegrees;
+        public float nextPhysicalSpeedSampleTime;
+        public float latestPhysicalAngularSpeedDps;
+        public int physicalSpeedSampleIndex;
+        public int slotSpeedEventIndex;
     }
 
     class QuestionnaireRecord
@@ -240,6 +252,50 @@ public class XRWorkloadProbeSceneController : MonoBehaviour
         public string utc = "";
     }
 
+    class QuestionnairePhysicalSpeedSample
+    {
+        public string blockId = "";
+        public int presentationOrder;
+        public int itemIndex;
+        public string itemId = "";
+        public string stage = "";
+        public float stageStartRealtime;
+        public int grabIndex;
+        public int sampleIndex;
+        public float realtime;
+        public int slot;
+        public float wristTwistDegrees;
+        public float deltaDegrees;
+        public float deltaTime;
+        public float physicalAngularSpeedDps;
+        public bool validForCalibration;
+        public string exclusionReason = "";
+    }
+
+    class QuestionnaireSlotSpeedEvent
+    {
+        public string blockId = "";
+        public int presentationOrder;
+        public int itemIndex;
+        public string itemId = "";
+        public string stage = "";
+        public float stageStartRealtime;
+        public int grabIndex;
+        public int eventIndex;
+        public float realtime;
+        public int fromSlot;
+        public int toSlot;
+        public int deltaSlots;
+        public float deltaTime;
+        public float slotsPerSecond;
+        public float slotAngleDegrees;
+        public float detentAngularSpeedDps;
+        public float wristTwistDegrees;
+        public float latestPhysicalAngularSpeedDps;
+        public bool validForCalibration;
+        public string exclusionReason = "";
+    }
+
     [Header("Run Mode")]
     public bool questionnaireOnlyMode = false;
     public bool requireReadAcknowledgement = false;
@@ -284,6 +340,16 @@ public class XRWorkloadProbeSceneController : MonoBehaviour
     [Range(2, 12)] public int questionnaireSpeedBandMinimumEpisodes = 3;
     [Range(2, 12)] public int questionnaireMicroMinimumTransitions = 4;
     [Range(1, 5)] public int questionnaireMicroMaximumSlotSpan = 2;
+
+    [Header("Questionnaire Personal Speed Calibration")]
+    public bool recordQuestionnairePersonalSpeed = true;
+    [Range(0.01f, 0.1f)] public float questionnairePhysicalSpeedSampleIntervalSec = 0.02f;
+    [Range(0f, 2f)] public float questionnairePhysicalSpeedMinimumDeltaDegrees = 0.1f;
+    [Range(0f, 50f)] public float questionnairePhysicalSpeedMinimumDps = 5f;
+    [Range(0.03f, 0.5f)] public float questionnairePhysicalSpeedMaximumSampleGapSec = 0.12f;
+    [Range(0.05f, 2f)] public float questionnaireSlotSpeedMaximumTransitionGapSec = 0.5f;
+    [Range(1, 100)] public int questionnaireCalibrationMinimumSlotEvents = 20;
+    [Range(5, 500)] public int questionnaireCalibrationMinimumPhysicalSamples = 30;
 
     [Header("Questionnaire Hold Confirmation")]
     [Range(0.4f, 1.5f)] public float questionnaireConfirmHoldSeconds = 0.8f;
@@ -332,6 +398,8 @@ public class XRWorkloadProbeSceneController : MonoBehaviour
     readonly List<QuestionnaireStageEvent> _questionnaireStageEvents = new List<QuestionnaireStageEvent>();
     readonly List<QuestionnaireRawTraceRecord> _questionnaireRawTraceRecords = new List<QuestionnaireRawTraceRecord>();
     readonly List<QuestionnaireInteractionEvent> _questionnaireInteractionEvents = new List<QuestionnaireInteractionEvent>();
+    readonly List<QuestionnairePhysicalSpeedSample> _questionnairePhysicalSpeedSamples = new List<QuestionnairePhysicalSpeedSample>();
+    readonly List<QuestionnaireSlotSpeedEvent> _questionnaireSlotSpeedEvents = new List<QuestionnaireSlotSpeedEvent>();
     readonly List<Behaviour> _questionnaireDisabledJumpBehaviours = new List<Behaviour>();
     readonly List<GameObject> _questionnaireTicks = new List<GameObject>();
     readonly List<GameObject> _questionnaireWallTicks = new List<GameObject>();
@@ -409,6 +477,9 @@ public class XRWorkloadProbeSceneController : MonoBehaviour
 
     protected virtual void Awake()
     {
+        if (ExperimentRunContext.IsConfigured)
+            participantId = ExperimentRunContext.ParticipantIdOr(participantId);
+
         questionnaireKnobDiameterMeters = RuntimeQuestionnaireKnobDiameterMeters;
         EnsureCamera();
         AddTrackedPoseDriverIfAvailable(_mainCamera.gameObject);
@@ -2145,6 +2216,10 @@ public class XRWorkloadProbeSceneController : MonoBehaviour
         stats.lastSlotChangeTime = stats.stageStartTime;
         stats.pauseCountedForCurrentDwell = false;
         stats.nextTraceSampleTime = stats.stageStartTime + Mathf.Max(0.01f, questionnaireTraceSampleIntervalSec);
+        stats.nextPhysicalSpeedSampleTime = stats.stageStartTime;
+        stats.activeGrabIndex = 0;
+        stats.hasSlotSpeedBaseline = false;
+        stats.hasPhysicalSpeedBaseline = false;
         _activeQuestionnaireMotionStats = stats;
         _activeQuestionnaireRecord = record;
         _activeQuestionnaireStageName = stageName;
@@ -2164,6 +2239,7 @@ public class XRWorkloadProbeSceneController : MonoBehaviour
                 if (_paxsmQuestionnaireGrab.IsGrabbing)
                     MarkQuestionnaireFirstInteraction(stats, Time.realtimeSinceStartup);
                 TrackQuestionnaireGrabState(stats, _paxsmQuestionnaireGrab.IsGrabbing);
+                TrackQuestionnairePhysicalSpeed(stats, _paxsmQuestionnaireGrab.IsGrabbing);
                 TrackQuestionnaireKnobDwell(stats);
                 if (_selectionRayRenderer != null)
                     _selectionRayRenderer.enabled = false;
@@ -2276,10 +2352,20 @@ public class XRWorkloadProbeSceneController : MonoBehaviour
         if (stats == null || stats.wasGrabbing == grabbing)
             return;
 
+        float now = Time.realtimeSinceStartup;
         stats.wasGrabbing = grabbing;
         if (grabbing)
         {
             stats.grabCount++;
+            if (ShouldRecordQuestionnairePersonalSpeed())
+            {
+                stats.activeGrabIndex++;
+                stats.hasSlotSpeedBaseline = true;
+                stats.slotSpeedBaselineSlot = _questionnaireHoverValue;
+                stats.slotSpeedBaselineTime = now;
+                stats.hasPhysicalSpeedBaseline = false;
+                stats.nextPhysicalSpeedSampleTime = now;
+            }
             LogQuestionnaireInteractionEvent(
                 _activeQuestionnaireRecord,
                 _activeQuestionnaireStageName,
@@ -2288,12 +2374,111 @@ public class XRWorkloadProbeSceneController : MonoBehaviour
         }
         else
         {
+            stats.hasSlotSpeedBaseline = false;
+            stats.hasPhysicalSpeedBaseline = false;
             LogQuestionnaireInteractionEvent(
                 _activeQuestionnaireRecord,
                 _activeQuestionnaireStageName,
                 "GrabEnd",
                 $"slot={_questionnaireHoverValue}");
         }
+    }
+
+    bool ShouldRecordQuestionnairePersonalSpeed()
+    {
+        return questionnaireOnlyMode && recordQuestionnairePersonalSpeed;
+    }
+
+    void TrackQuestionnairePhysicalSpeed(QuestionnaireMotionStats stats, bool grabbing)
+    {
+        if (!ShouldRecordQuestionnairePersonalSpeed() || stats == null || !grabbing ||
+            _paxsmQuestionnaireGrab == null || _activeQuestionnaireRecord == null)
+            return;
+
+        float now = Time.realtimeSinceStartup;
+        float twist = _paxsmQuestionnaireGrab.CurrentTwistDegrees;
+        if (!stats.hasPhysicalSpeedBaseline)
+        {
+            stats.hasPhysicalSpeedBaseline = true;
+            stats.lastPhysicalSpeedSampleTime = now;
+            stats.lastPhysicalTwistDegrees = twist;
+            stats.nextPhysicalSpeedSampleTime = now + Mathf.Max(0.01f, questionnairePhysicalSpeedSampleIntervalSec);
+            AddQuestionnairePhysicalSpeedSample(
+                stats, now, twist, 0f, 0f, 0f, false, "baseline");
+            return;
+        }
+
+        if (now < stats.nextPhysicalSpeedSampleTime)
+            return;
+
+        float dt = now - stats.lastPhysicalSpeedSampleTime;
+        float deltaDegrees = twist - stats.lastPhysicalTwistDegrees;
+        float angularSpeed = dt > 0.0001f ? Mathf.Abs(deltaDegrees) / dt : 0f;
+        bool valid = true;
+        string exclusionReason = "";
+        if (dt <= 0.0001f)
+        {
+            valid = false;
+            exclusionReason = "nonpositive_dt";
+        }
+        else if (dt > Mathf.Max(0.03f, questionnairePhysicalSpeedMaximumSampleGapSec))
+        {
+            valid = false;
+            exclusionReason = "sample_gap_too_long";
+        }
+        else if (Mathf.Abs(deltaDegrees) < Mathf.Max(0f, questionnairePhysicalSpeedMinimumDeltaDegrees))
+        {
+            valid = false;
+            exclusionReason = "below_motion_delta";
+        }
+        else if (angularSpeed < Mathf.Max(0f, questionnairePhysicalSpeedMinimumDps))
+        {
+            valid = false;
+            exclusionReason = "below_motion_speed";
+        }
+
+        stats.latestPhysicalAngularSpeedDps = angularSpeed;
+        AddQuestionnairePhysicalSpeedSample(
+            stats, now, twist, deltaDegrees, dt, angularSpeed, valid, exclusionReason);
+        stats.lastPhysicalSpeedSampleTime = now;
+        stats.lastPhysicalTwistDegrees = twist;
+        stats.nextPhysicalSpeedSampleTime = now + Mathf.Max(0.01f, questionnairePhysicalSpeedSampleIntervalSec);
+    }
+
+    void AddQuestionnairePhysicalSpeedSample(
+        QuestionnaireMotionStats stats,
+        float now,
+        float twist,
+        float deltaDegrees,
+        float dt,
+        float angularSpeed,
+        bool valid,
+        string exclusionReason)
+    {
+        QuestionnaireRecord record = _activeQuestionnaireRecord;
+        if (stats == null || record == null)
+            return;
+
+        stats.physicalSpeedSampleIndex++;
+        _questionnairePhysicalSpeedSamples.Add(new QuestionnairePhysicalSpeedSample
+        {
+            blockId = record.blockId,
+            presentationOrder = record.presentationOrder,
+            itemIndex = record.itemIndex,
+            itemId = record.itemId,
+            stage = _activeQuestionnaireStageName,
+            stageStartRealtime = stats.stageStartTime,
+            grabIndex = stats.activeGrabIndex,
+            sampleIndex = stats.physicalSpeedSampleIndex,
+            realtime = now,
+            slot = _questionnaireHoverValue,
+            wristTwistDegrees = twist,
+            deltaDegrees = deltaDegrees,
+            deltaTime = dt,
+            physicalAngularSpeedDps = angularSpeed,
+            validForCalibration = valid,
+            exclusionReason = exclusionReason ?? ""
+        });
     }
 
     void AddQuestionnaireTraceSample(
@@ -2839,6 +3024,7 @@ public class XRWorkloadProbeSceneController : MonoBehaviour
         if (deltaSlots == 0)
             return;
 
+        RecordQuestionnaireSlotSpeedEvent(stats, slot, now);
         MarkQuestionnaireFirstInteraction(stats, now);
         AddQuestionnaireTraceSample(stats, slot, "slot_change", "paxsm_knob", isAnchor: false);
         float dt = Mathf.Max(0.001f, now - stats.lastSlotChangeTime);
@@ -2867,6 +3053,93 @@ public class XRWorkloadProbeSceneController : MonoBehaviour
         stats.lastSlot = slot;
         stats.lastSlotChangeTime = now;
         stats.pauseCountedForCurrentDwell = false;
+    }
+
+    void RecordQuestionnaireSlotSpeedEvent(
+        QuestionnaireMotionStats stats,
+        int toSlot,
+        float now)
+    {
+        if (!ShouldRecordQuestionnairePersonalSpeed() || stats == null ||
+            _activeQuestionnaireRecord == null)
+            return;
+
+        bool grabbing = _paxsmQuestionnaireGrab != null && _paxsmQuestionnaireGrab.IsGrabbing;
+        bool hasBaseline = stats.hasSlotSpeedBaseline && stats.slotSpeedBaselineSlot > 0;
+        int fromSlot = hasBaseline ? stats.slotSpeedBaselineSlot : stats.lastSlot;
+        int deltaSlots = toSlot - fromSlot;
+        float dt = hasBaseline ? now - stats.slotSpeedBaselineTime : 0f;
+        float slotsPerSecond = dt > 0.0001f ? Mathf.Abs(deltaSlots) / dt : -1f;
+        float slotAngleDegrees = _questionnaireCurrentScale > 1
+            ? Mathf.Abs(QuestionnaireKnobMaxAngle() - QuestionnaireKnobMinAngle()) /
+              (_questionnaireCurrentScale - 1f)
+            : 0f;
+        float detentAngularSpeedDps = slotsPerSecond >= 0f
+            ? slotsPerSecond * slotAngleDegrees
+            : -1f;
+
+        bool valid = true;
+        string exclusionReason = "";
+        if (!grabbing)
+        {
+            valid = false;
+            exclusionReason = "not_wrist_grab_input";
+        }
+        else if (!hasBaseline)
+        {
+            valid = false;
+            exclusionReason = "missing_grab_baseline";
+        }
+        else if (deltaSlots == 0)
+        {
+            valid = false;
+            exclusionReason = "no_slot_change";
+        }
+        else if (dt <= 0.0001f)
+        {
+            valid = false;
+            exclusionReason = "nonpositive_dt";
+        }
+        else if (dt > Mathf.Max(0.05f, questionnaireSlotSpeedMaximumTransitionGapSec))
+        {
+            valid = false;
+            exclusionReason = "transition_gap_too_long";
+        }
+
+        stats.slotSpeedEventIndex++;
+        QuestionnaireRecord record = _activeQuestionnaireRecord;
+        _questionnaireSlotSpeedEvents.Add(new QuestionnaireSlotSpeedEvent
+        {
+            blockId = record.blockId,
+            presentationOrder = record.presentationOrder,
+            itemIndex = record.itemIndex,
+            itemId = record.itemId,
+            stage = _activeQuestionnaireStageName,
+            stageStartRealtime = stats.stageStartTime,
+            grabIndex = stats.activeGrabIndex,
+            eventIndex = stats.slotSpeedEventIndex,
+            realtime = now,
+            fromSlot = fromSlot,
+            toSlot = toSlot,
+            deltaSlots = deltaSlots,
+            deltaTime = dt,
+            slotsPerSecond = slotsPerSecond,
+            slotAngleDegrees = slotAngleDegrees,
+            detentAngularSpeedDps = detentAngularSpeedDps,
+            wristTwistDegrees = _paxsmQuestionnaireGrab != null
+                ? _paxsmQuestionnaireGrab.CurrentTwistDegrees
+                : 0f,
+            latestPhysicalAngularSpeedDps = stats.latestPhysicalAngularSpeedDps,
+            validForCalibration = valid,
+            exclusionReason = exclusionReason
+        });
+
+        if (grabbing)
+        {
+            stats.hasSlotSpeedBaseline = true;
+            stats.slotSpeedBaselineSlot = toSlot;
+            stats.slotSpeedBaselineTime = now;
+        }
     }
 
     void TrackQuestionnaireKnobDwell(QuestionnaireMotionStats stats)
@@ -3489,7 +3762,8 @@ public class XRWorkloadProbeSceneController : MonoBehaviour
         if (!_completedExportWritten && writeCsvOnQuit &&
             (_trialRecords.Count > 0 || _questionnaireRecords.Count > 0 ||
              _questionnaireStageEvents.Count > 0 || _questionnaireRawTraceRecords.Count > 0 ||
-             _questionnaireInteractionEvents.Count > 0))
+             _questionnaireInteractionEvents.Count > 0 ||
+             _questionnairePhysicalSpeedSamples.Count > 0 || _questionnaireSlotSpeedEvents.Count > 0))
             WriteCsvFiles("quit");
     }
 
@@ -3527,12 +3801,21 @@ public class XRWorkloadProbeSceneController : MonoBehaviour
             string rawTracePath = Path.Combine(folder, $"CAREXR_Questionnaire_RawTrace_{suffix}.csv");
             string interactionPath = Path.Combine(folder, $"CAREXR_Questionnaire_InteractionEvents_{suffix}.csv");
             string metadataPath = Path.Combine(folder, $"CAREXR_Questionnaire_Metadata_{suffix}.csv");
+            string physicalSpeedPath = Path.Combine(folder, $"CAREXR_Questionnaire_PhysicalSpeedSamples_{suffix}.csv");
+            string slotSpeedPath = Path.Combine(folder, $"CAREXR_Questionnaire_SlotSpeedEvents_{suffix}.csv");
+            string speedSummaryPath = Path.Combine(folder, $"CAREXR_Questionnaire_SpeedSummary_{suffix}.csv");
             File.WriteAllText(rawTracePath, BuildQuestionnaireRawTraceCsv(), Encoding.UTF8);
             File.WriteAllText(interactionPath, BuildQuestionnaireInteractionEventsCsv(), Encoding.UTF8);
             File.WriteAllText(metadataPath, BuildQuestionnaireMetadataCsv(), Encoding.UTF8);
+            File.WriteAllText(physicalSpeedPath, BuildQuestionnairePhysicalSpeedSamplesCsv(), Encoding.UTF8);
+            File.WriteAllText(slotSpeedPath, BuildQuestionnaireSlotSpeedEventsCsv(), Encoding.UTF8);
+            File.WriteAllText(speedSummaryPath, BuildQuestionnaireSpeedSummaryCsv(), Encoding.UTF8);
             savedPaths.Add(rawTracePath);
             savedPaths.Add(interactionPath);
             savedPaths.Add(metadataPath);
+            savedPaths.Add(physicalSpeedPath);
+            savedPaths.Add(slotSpeedPath);
+            savedPaths.Add(speedSummaryPath);
         }
 
         if (_mainSceneMergedExporter != null &&
@@ -3574,6 +3857,15 @@ public class XRWorkloadProbeSceneController : MonoBehaviour
             WriteCheckpointFile(
                 Path.Combine(folder, $"CAREXR_Questionnaire_Metadata_{suffix}.csv"),
                 BuildQuestionnaireMetadataCsv());
+            WriteCheckpointFile(
+                Path.Combine(folder, $"CAREXR_Questionnaire_PhysicalSpeedSamples_{suffix}.csv"),
+                BuildQuestionnairePhysicalSpeedSamplesCsv());
+            WriteCheckpointFile(
+                Path.Combine(folder, $"CAREXR_Questionnaire_SlotSpeedEvents_{suffix}.csv"),
+                BuildQuestionnaireSlotSpeedEventsCsv());
+            WriteCheckpointFile(
+                Path.Combine(folder, $"CAREXR_Questionnaire_SpeedSummary_{suffix}.csv"),
+                BuildQuestionnaireSpeedSummaryCsv());
         }
         catch (Exception exception)
         {
@@ -3603,6 +3895,9 @@ public class XRWorkloadProbeSceneController : MonoBehaviour
 
     string GetOutputFolder()
     {
+        if (ExperimentRunContext.IsConfigured)
+            return ExperimentRunContext.ResolveOutputDirectory(outputFolderName);
+
         return Path.Combine(Application.persistentDataPath, outputFolderName);
     }
 
@@ -3784,6 +4079,169 @@ public class XRWorkloadProbeSceneController : MonoBehaviour
         return sb.ToString();
     }
 
+    string BuildQuestionnairePhysicalSpeedSamplesCsv()
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("participantId,sessionNumber,conditionLabel,schemaVersion,speedSchemaVersion,taskType,blockId,presentationOrder,itemIndex,itemId,mark,stage,grabIndex,sampleIndex,realtime,stageElapsed,slot,wristTwistDegrees,deltaDegrees,deltaTimeSec,physicalAngularSpeedDps,validForCalibration,exclusionReason");
+        foreach (QuestionnairePhysicalSpeedSample sample in _questionnairePhysicalSpeedSamples)
+        {
+            sb.AppendLine(string.Join(",",
+                Csv(participantId), I(sessionNumber), Csv(EffectiveConditionLabel()), Csv(QuestionnaireSchemaVersion),
+                Csv(QuestionnaireSpeedSchemaVersion), Csv("QuestionnaireRead"), Csv(sample.blockId),
+                I(sample.presentationOrder), I(sample.itemIndex), Csv(sample.itemId),
+                Csv($"Q{sample.itemIndex}-{Mathf.Max(1, sample.presentationOrder)}"), Csv(sample.stage),
+                I(sample.grabIndex), I(sample.sampleIndex), F(sample.realtime),
+                F(Mathf.Max(0f, sample.realtime - sample.stageStartRealtime)), I(sample.slot),
+                F(sample.wristTwistDegrees), F(sample.deltaDegrees), F(sample.deltaTime),
+                F(sample.physicalAngularSpeedDps), B(sample.validForCalibration), Csv(sample.exclusionReason)));
+        }
+        return sb.ToString();
+    }
+
+    string BuildQuestionnaireSlotSpeedEventsCsv()
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("participantId,sessionNumber,conditionLabel,schemaVersion,speedSchemaVersion,taskType,blockId,presentationOrder,itemIndex,itemId,mark,stage,grabIndex,eventIndex,realtime,stageElapsed,fromSlot,toSlot,deltaSlots,deltaTimeSec,slotsPerSecond,slotAngleDegrees,detentAngularSpeedDps,wristTwistDegrees,latestPhysicalAngularSpeedDps,validForCalibration,exclusionReason");
+        foreach (QuestionnaireSlotSpeedEvent speedEvent in _questionnaireSlotSpeedEvents)
+        {
+            sb.AppendLine(string.Join(",",
+                Csv(participantId), I(sessionNumber), Csv(EffectiveConditionLabel()), Csv(QuestionnaireSchemaVersion),
+                Csv(QuestionnaireSpeedSchemaVersion), Csv("QuestionnaireRead"), Csv(speedEvent.blockId),
+                I(speedEvent.presentationOrder), I(speedEvent.itemIndex), Csv(speedEvent.itemId),
+                Csv($"Q{speedEvent.itemIndex}-{Mathf.Max(1, speedEvent.presentationOrder)}"), Csv(speedEvent.stage),
+                I(speedEvent.grabIndex), I(speedEvent.eventIndex), F(speedEvent.realtime),
+                F(Mathf.Max(0f, speedEvent.realtime - speedEvent.stageStartRealtime)),
+                I(speedEvent.fromSlot), I(speedEvent.toSlot), I(speedEvent.deltaSlots), F(speedEvent.deltaTime),
+                F(speedEvent.slotsPerSecond), F(speedEvent.slotAngleDegrees),
+                F(speedEvent.detentAngularSpeedDps), F(speedEvent.wristTwistDegrees),
+                F(speedEvent.latestPhysicalAngularSpeedDps), B(speedEvent.validForCalibration),
+                Csv(speedEvent.exclusionReason)));
+        }
+        return sb.ToString();
+    }
+
+    string BuildQuestionnaireSpeedSummaryCsv()
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("participantId,sessionNumber,conditionLabel,schemaVersion,speedSchemaVersion,scope,blockId,presentationOrder,itemIndex,itemId,stage,responseScale,slotAngleDegrees,slotTransitionCount,validSlotTransitionCount,slotSpsMedian,slotSpsMAD,slotSpsP90,slotSpsP95,slotSpsMax,detentDpsMedian,detentDpsMAD,detentDpsP90,detentDpsP95,detentDpsMax,physicalSampleCount,validPhysicalSampleCount,physicalDpsMedian,physicalDpsMAD,physicalDpsP90,physicalDpsP95,physicalDpsMax,calibrationQuality,qualityNote");
+
+        for (int i = 0; i < _questionnaireRecords.Count; i++)
+        {
+            QuestionnaireRecord record = _questionnaireRecords[i];
+            AppendQuestionnaireSpeedSummaryRow(
+                sb, "item_stage", record, "Answer", Mathf.Max(2, record.scale));
+            if (collectConfidenceAfterEachItem)
+            {
+                AppendQuestionnaireSpeedSummaryRow(
+                    sb, "item_stage", record, "Confidence", Mathf.Max(2, questionnaireConfidenceScale));
+            }
+        }
+
+        AppendQuestionnaireSpeedSummaryRow(
+            sb, "participant_stage", null, "Answer", Mathf.Max(2, questionnaireScale));
+        if (collectConfidenceAfterEachItem)
+        {
+            AppendQuestionnaireSpeedSummaryRow(
+                sb, "participant_stage", null, "Confidence", Mathf.Max(2, questionnaireConfidenceScale));
+        }
+        return sb.ToString();
+    }
+
+    void AppendQuestionnaireSpeedSummaryRow(
+        StringBuilder sb,
+        string scope,
+        QuestionnaireRecord record,
+        string stage,
+        int responseScale)
+    {
+        var slotSpeeds = new List<float>();
+        var detentSpeeds = new List<float>();
+        var physicalSpeeds = new List<float>();
+        int slotEventCount = 0;
+        int physicalSampleCount = 0;
+
+        for (int i = 0; i < _questionnaireSlotSpeedEvents.Count; i++)
+        {
+            QuestionnaireSlotSpeedEvent speedEvent = _questionnaireSlotSpeedEvents[i];
+            if (!QuestionnaireSpeedContextMatches(
+                    speedEvent.blockId, speedEvent.presentationOrder, speedEvent.itemIndex,
+                    speedEvent.itemId, speedEvent.stage, record, stage))
+                continue;
+
+            slotEventCount++;
+            if (!speedEvent.validForCalibration || speedEvent.slotsPerSecond < 0f)
+                continue;
+            slotSpeeds.Add(speedEvent.slotsPerSecond);
+            detentSpeeds.Add(speedEvent.detentAngularSpeedDps);
+        }
+
+        for (int i = 0; i < _questionnairePhysicalSpeedSamples.Count; i++)
+        {
+            QuestionnairePhysicalSpeedSample sample = _questionnairePhysicalSpeedSamples[i];
+            if (!QuestionnaireSpeedContextMatches(
+                    sample.blockId, sample.presentationOrder, sample.itemIndex,
+                    sample.itemId, sample.stage, record, stage))
+                continue;
+
+            physicalSampleCount++;
+            if (sample.validForCalibration)
+                physicalSpeeds.Add(sample.physicalAngularSpeedDps);
+        }
+
+        QuestionnaireSpeedDistribution slotDistribution = QuestionnaireSpeedStatistics.Calculate(slotSpeeds);
+        QuestionnaireSpeedDistribution detentDistribution = QuestionnaireSpeedStatistics.Calculate(detentSpeeds);
+        QuestionnaireSpeedDistribution physicalDistribution = QuestionnaireSpeedStatistics.Calculate(physicalSpeeds);
+        bool participantScope = string.Equals(scope, "participant_stage", StringComparison.Ordinal);
+        string quality = participantScope
+            ? QuestionnaireSpeedStatistics.CalibrationQuality(
+                slotDistribution.count,
+                physicalDistribution.count,
+                questionnaireCalibrationMinimumSlotEvents,
+                questionnaireCalibrationMinimumPhysicalSamples)
+            : "descriptive_only";
+        string qualityNote = participantScope
+            ? $"valid_slot_events={slotDistribution.count}/{Mathf.Max(1, questionnaireCalibrationMinimumSlotEvents)};" +
+              $"valid_physical_samples={physicalDistribution.count}/{Mathf.Max(1, questionnaireCalibrationMinimumPhysicalSamples)};" +
+              "use_stage_specific_profile"
+            : "item rows are descriptive; use participant_stage for personal calibration";
+        float slotAngleDegrees = responseScale > 1
+            ? Mathf.Abs(QuestionnaireKnobMaxAngle() - QuestionnaireKnobMinAngle()) / (responseScale - 1f)
+            : 0f;
+
+        sb.AppendLine(string.Join(",",
+            Csv(participantId), I(sessionNumber), Csv(EffectiveConditionLabel()), Csv(QuestionnaireSchemaVersion),
+            Csv(QuestionnaireSpeedSchemaVersion), Csv(scope), Csv(record != null ? record.blockId : "ALL"),
+            I(record != null ? record.presentationOrder : 0), I(record != null ? record.itemIndex : 0),
+            Csv(record != null ? record.itemId : "ALL"), Csv(stage), I(responseScale), F(slotAngleDegrees),
+            I(slotEventCount), I(slotDistribution.count),
+            F(slotDistribution.median), F(slotDistribution.mad), F(slotDistribution.p90),
+            F(slotDistribution.p95), F(slotDistribution.max),
+            F(detentDistribution.median), F(detentDistribution.mad), F(detentDistribution.p90),
+            F(detentDistribution.p95), F(detentDistribution.max),
+            I(physicalSampleCount), I(physicalDistribution.count),
+            F(physicalDistribution.median), F(physicalDistribution.mad), F(physicalDistribution.p90),
+            F(physicalDistribution.p95), F(physicalDistribution.max), Csv(quality), Csv(qualityNote)));
+    }
+
+    bool QuestionnaireSpeedContextMatches(
+        string blockId,
+        int presentationOrder,
+        int itemIndex,
+        string itemId,
+        string eventStage,
+        QuestionnaireRecord record,
+        string requestedStage)
+    {
+        if (!string.Equals(eventStage, requestedStage, StringComparison.OrdinalIgnoreCase))
+            return false;
+        if (record == null)
+            return true;
+        return string.Equals(blockId, record.blockId, StringComparison.Ordinal) &&
+               presentationOrder == record.presentationOrder &&
+               itemIndex == record.itemIndex &&
+               string.Equals(itemId, record.itemId, StringComparison.Ordinal);
+    }
+
     string BuildQuestionnaireInteractionEventsCsv()
     {
         var sb = new StringBuilder();
@@ -3802,7 +4260,7 @@ public class XRWorkloadProbeSceneController : MonoBehaviour
     string BuildQuestionnaireMetadataCsv()
     {
         var sb = new StringBuilder();
-        sb.AppendLine("participantId,sessionNumber,conditionLabel,questionnaireSessionId,schemaVersion,featureAlgorithmVersion,questionBankResourcesPath,responseScale,confidenceScale,collectConfidence,requireReadAcknowledgement,readExitControl,confirmHoldSeconds,knobDiameterMeters,knobArcDegrees,pauseThresholdSec,stillThresholdSec,fastFlickThresholdSps,traceSampleIntervalSec,speedDeltaMin,speedDeltaK,speedBandMinimumEpisodes,microMinimumTransitions,microMaximumSlotSpan,unityVersion,platform,deviceModel,operatingSystem,xrLoadedDevice,generatedUtc");
+        sb.AppendLine("participantId,sessionNumber,conditionLabel,questionnaireSessionId,schemaVersion,featureAlgorithmVersion,questionBankResourcesPath,responseScale,confidenceScale,collectConfidence,requireReadAcknowledgement,readExitControl,confirmHoldSeconds,knobDiameterMeters,knobArcDegrees,pauseThresholdSec,stillThresholdSec,fastFlickThresholdSps,traceSampleIntervalSec,speedDeltaMin,speedDeltaK,speedBandMinimumEpisodes,microMinimumTransitions,microMaximumSlotSpan,personalSpeedRecordingEnabled,speedSchemaVersion,physicalSpeedSampleIntervalSec,physicalSpeedMinimumDeltaDegrees,physicalSpeedMinimumDps,physicalSpeedMaximumSampleGapSec,slotSpeedMaximumTransitionGapSec,calibrationMinimumSlotEvents,calibrationMinimumPhysicalSamples,physicalAngleSource,slotSpeedDefinition,speedConfirmationSamplesExcluded,unityVersion,platform,deviceModel,operatingSystem,xrLoadedDevice,generatedUtc");
         sb.AppendLine(string.Join(",",
             Csv(participantId), I(sessionNumber), Csv(EffectiveConditionLabel()), Csv(questionnaireOnlySessionId),
             Csv(QuestionnaireSchemaVersion), Csv(EffectiveFeatureAlgorithmVersion()), Csv(questionnaireBankResourcesPath),
@@ -3812,7 +4270,14 @@ public class XRWorkloadProbeSceneController : MonoBehaviour
             F(questionnaireStillThresholdSec), F(questionnaireFastFlickThresholdSps),
             F(questionnaireTraceSampleIntervalSec), F(questionnaireSpeedDeltaMin), F(questionnaireSpeedDeltaK),
             I(questionnaireSpeedBandMinimumEpisodes), I(questionnaireMicroMinimumTransitions),
-            I(questionnaireMicroMaximumSlotSpan), Csv(Application.unityVersion), Csv(Application.platform.ToString()),
+            I(questionnaireMicroMaximumSlotSpan), B(ShouldRecordQuestionnairePersonalSpeed()),
+            Csv(QuestionnaireSpeedSchemaVersion), F(questionnairePhysicalSpeedSampleIntervalSec),
+            F(questionnairePhysicalSpeedMinimumDeltaDegrees), F(questionnairePhysicalSpeedMinimumDps),
+            F(questionnairePhysicalSpeedMaximumSampleGapSec), F(questionnaireSlotSpeedMaximumTransitionGapSec),
+            I(questionnaireCalibrationMinimumSlotEvents), I(questionnaireCalibrationMinimumPhysicalSamples),
+            Csv("controller_wrist_twist_relative_to_grab_start"),
+            Csv("absolute_delta_slots_over_time_between_grab_baseline_or_slot_events"), B(true),
+            Csv(Application.unityVersion), Csv(Application.platform.ToString()),
             Csv(SystemInfo.deviceModel), Csv(SystemInfo.operatingSystem), Csv(XRSettings.loadedDeviceName),
             Csv(DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture))));
         return sb.ToString();

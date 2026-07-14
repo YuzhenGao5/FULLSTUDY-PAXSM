@@ -8,6 +8,7 @@ public sealed class XRQuestionnaireReadSceneController : XRWorkloadProbeSceneCon
         requireReadAcknowledgement = true;
         collectQuestionnaireBetweenBlocks = true;
         collectConfidenceAfterEachItem = true;
+        recordQuestionnairePersonalSpeed = true;
 
         if (string.IsNullOrWhiteSpace(conditionLabel))
             conditionLabel = "QuestionnaireRead";

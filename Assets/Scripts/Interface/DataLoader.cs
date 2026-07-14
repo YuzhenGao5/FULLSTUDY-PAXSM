@@ -136,6 +136,9 @@ public class KnobBehaviorMergedCSVExporter : MonoBehaviour
     {
         if (_exported) return;
 
+        if (ExperimentRunContext.TryGetParticipantNumber(out int configuredParticipantNumber))
+            participantNumber = configuredParticipantNumber;
+
         if (answerKnob == null || confidenceKnob == null)
         {
             Debug.LogError("[KnobMergedCSV] 你还没把 answerKnob / confidenceKnob 两个对象都拖进 Inspector。", this);
@@ -170,6 +173,9 @@ public class KnobBehaviorMergedCSVExporter : MonoBehaviour
 
     string ResolveBaseFolder()
     {
+        if (ExperimentRunContext.IsConfigured)
+            return ExperimentRunContext.ResolveRunDirectory();
+
         if (outputMode == OutputMode.ProjectAssets)
         {
 #if UNITY_EDITOR

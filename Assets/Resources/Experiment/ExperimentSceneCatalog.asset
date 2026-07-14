@@ -1,0 +1,30 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: c4e4d45fdc205f345a644a6a6160934e, type: 3}
+  m_Name: ExperimentSceneCatalog
+  m_EditorClassIdentifier: Assembly-CSharp::ExperimentSceneCatalog
+  scenes:
+  - id: main-questionnaire
+    displayName: Main questionnaire
+    sceneName: MainScene
+    dataNamespace: MainScene_Data
+    enabled: 1
+  - id: workload-probe
+    displayName: Workload probe
+    sceneName: XRWorkloadProbeScene
+    dataNamespace: XRWorkloadProbe_Data
+    enabled: 1
+  - id: questionnaire-read
+    displayName: Questionnaire with Read stage
+    sceneName: XRQuestionnaireReadScene
+    dataNamespace: XRQuestionnaireRead_Data
+    enabled: 1

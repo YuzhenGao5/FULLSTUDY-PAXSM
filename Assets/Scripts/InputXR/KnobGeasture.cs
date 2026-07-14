@@ -64,6 +64,10 @@ public class KnobGrabByWrist : MonoBehaviour
     /// <summary>当前是否处于“抓住 Knob”状态</summary>
     public bool IsGrabbing { get; private set; } = false;
 
+    // Continuous wrist twist used by the questionnaire calibration recorder.
+    // Reading this property does not change the existing detent interaction.
+    public float CurrentTwistDegrees { get; private set; } = 0f;
+
     // 内部状态
     bool lastButtonsHeld = false;
     int  baseIndex;               // 抓住那一刻 KnobCore.currentIndex
@@ -90,12 +94,14 @@ public class KnobGrabByWrist : MonoBehaviour
     {
         SetVisualGrabbing(false);
         IsGrabbing = false;
+        CurrentTwistDegrees = 0f;
     }
 
     void OnDisable()
     {
         SetVisualGrabbing(false);
         IsGrabbing = false;
+        CurrentTwistDegrees = 0f;
     }
 
     void Update()
@@ -159,6 +165,7 @@ public class KnobGrabByWrist : MonoBehaviour
     void BeginGrab(ITickRing ring)
     {
         IsGrabbing = true;
+        CurrentTwistDegrees = 0f;
 
         // 抓取时自动进入 Knob 模式
         if (knobModeManager != null && !knobModeManager.isKnobMode)
@@ -190,6 +197,7 @@ public class KnobGrabByWrist : MonoBehaviour
     void EndGrab()
     {
         IsGrabbing = false;
+        CurrentTwistDegrees = 0f;
         SetVisualGrabbing(false);
 
         if (knobModeManager != null && knobModeManager.isKnobMode)
@@ -255,6 +263,7 @@ public class KnobGrabByWrist : MonoBehaviour
     void UpdateGrabRotationByIndex(ITickRing ring)
     {
         float delta = GetRelativeTwistAngle();
+        CurrentTwistDegrees = delta;
 
         if (Mathf.Abs(delta) < deadZoneDegrees) return;
         if (Mathf.Approximately(degreesPerStep, 0f)) return;
