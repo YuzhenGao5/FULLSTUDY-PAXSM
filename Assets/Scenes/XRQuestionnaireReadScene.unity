@@ -215,15 +215,15 @@ MonoBehaviour:
   paxsmKnobRigPrefab: {fileID: 0}
   questionnaireBankResourcesPath: QuestionBanks/Scale
   questionnaireKnobDiameterMeters: 0.1
-  questionnaireKnobPosition: {x: 0.38, y: 1.02, z: 0.64}
+  questionnaireKnobPosition: {x: 0.1, y: 0.95, z: 0.5}
   questionnairePanelTiltDegrees: 18
   questionnaireKnobArcDegrees: 120
   questionnaireUseHeadRelativePlacement: 1
-  questionnaireForwardOffset: 0.42
-  questionnaireRightOffset: 0.16
-  questionnaireBelowEyeOffset: 0.42
-  questionnaireMinimumHeight: 0.72
-  questionnaireMaximumHeight: 1.45
+  questionnaireForwardOffset: 0.5
+  questionnaireRightOffset: 0.1
+  questionnaireBelowEyeOffset: 0.26
+  questionnaireMinimumHeight: 0.65
+  questionnaireMaximumHeight: 1.35
   questionnaireGrabRadius: 0.14
   questionnaireScale: 21
   questionnaireConfidenceScale: 5
@@ -242,6 +242,22 @@ MonoBehaviour:
   questionnaireConfirmHapticInterval: 0.08
   questionnaireConfirmHapticMin: 0.04
   questionnaireConfirmHapticMax: 0.62
+  headPoseSettleSeconds: 0.35
+  readSceneKnobForwardOffset: 0.5
+  readSceneKnobRightOffset: 0.1
+  readSceneKnobBelowEyeOffset: 0.26
+  readSceneKnobMinimumHeight: 0.65
+  readSceneKnobMaximumHeight: 1.35
+  showFirstGrabGuidance: 1
+  grabGuideOuterOffset: 0.18
+  grabGuideInnerOffset: 0.075
+  showControllerTutorial: 1
+  tutorialRightControllerPrefab: {fileID: 4283425761326543017, guid: 9f3369e30fbd31f4bb596b1a99babe83, type: 3}
+  tutorialControllerTablePosition: {x: -0.45, y: 0.76, z: 1.45}
+  tutorialControllerEuler: {x: 24, y: 162, z: -24}
+  tutorialControllerTableClearance: 0.015
+  tutorialControllerScale: 2.8
+  tutorialCycleSeconds: 4.6
   enableCorrectHaptics: 1
   suppressCorrectHapticsInFrustrationBlock: 1
   correctHapticAmplitude: 0.45
