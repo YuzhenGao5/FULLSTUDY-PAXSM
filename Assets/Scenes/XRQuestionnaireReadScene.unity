@@ -221,7 +221,7 @@ MonoBehaviour:
   questionnaireUseHeadRelativePlacement: 1
   questionnaireForwardOffset: 0.42
   questionnaireRightOffset: 0.16
-  questionnaireBelowEyeOffset: 0.28
+  questionnaireBelowEyeOffset: 0.42
   questionnaireMinimumHeight: 0.72
   questionnaireMaximumHeight: 1.45
   questionnaireGrabRadius: 0.14
