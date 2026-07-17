@@ -302,8 +302,8 @@ public class XRWorkloadProbeSceneController : MonoBehaviour
     public string questionnaireOnlySessionId = "standalone_questionnaire";
 
     public string participantId = "P001";
-    [Range(1, 99)] public int sessionNumber = 1;
-    public string conditionLabel = "QuestionnaireRead";
+    [Range(1, 99)] public int sessionNumber = 2;
+    public string conditionLabel = "WorkloadProbe";
     public bool randomizeWorkloadBlocks = false;
     public bool startAutomatically = true;
     public bool writeCsvOnQuit = true;
@@ -3796,7 +3796,9 @@ public class XRWorkloadProbeSceneController : MonoBehaviour
         savedPaths.Add(questionnairePath);
         savedPaths.Add(stageEventsPath);
 
-        if (questionnaireOnlyMode)
+        if (_questionnaireRecords.Count > 0 || _questionnaireRawTraceRecords.Count > 0 ||
+            _questionnaireInteractionEvents.Count > 0 ||
+            _questionnairePhysicalSpeedSamples.Count > 0 || _questionnaireSlotSpeedEvents.Count > 0)
         {
             string rawTracePath = Path.Combine(folder, $"CAREXR_Questionnaire_RawTrace_{suffix}.csv");
             string interactionPath = Path.Combine(folder, $"CAREXR_Questionnaire_InteractionEvents_{suffix}.csv");
@@ -3904,11 +3906,11 @@ public class XRWorkloadProbeSceneController : MonoBehaviour
     string BuildTrialCsv()
     {
         var sb = new StringBuilder();
-        sb.AppendLine("participantId,taskType,blockId,targetDimension,presentationOrder,trialIndex,scheduleId,cue,rule,targetLayout,ruleComplexity,targetCount,distractorCount,targetDistance,targetSize,timeLimit,successThresholdStrictness,effectiveSelectionCone,effectiveSelectionAssistRadius,gazeFallbackAllowed,feedbackDelay,controlNoise,decisionRt,timeout,isCorrect,correctHapticPlayed,correctHapticSuppressed,correctIndex,selectedIndex,pointerPath,pointerPeakSpeed,pauseCount,hoverChangeCount");
+        sb.AppendLine("participantId,sessionNumber,conditionLabel,taskType,blockId,targetDimension,presentationOrder,trialIndex,scheduleId,cue,rule,targetLayout,ruleComplexity,targetCount,distractorCount,targetDistance,targetSize,timeLimit,successThresholdStrictness,effectiveSelectionCone,effectiveSelectionAssistRadius,gazeFallbackAllowed,feedbackDelay,controlNoise,decisionRt,timeout,isCorrect,correctHapticPlayed,correctHapticSuppressed,correctIndex,selectedIndex,pointerPath,pointerPeakSpeed,pauseCount,hoverChangeCount");
         foreach (TrialRecord r in _trialRecords)
         {
             sb.AppendLine(string.Join(",",
-                Csv(participantId), Csv(r.blockId), Csv(r.blockId), Csv(r.targetDimension), r.presentationOrder, r.trialIndex,
+                Csv(participantId), I(sessionNumber), Csv(EffectiveConditionLabel()), Csv(r.blockId), Csv(r.blockId), Csv(r.targetDimension), r.presentationOrder, r.trialIndex,
                 Csv(r.scheduleId), Csv(r.cue), Csv(r.rule), Csv(r.targetLayout), r.ruleComplexity,
                 r.targetCount, r.distractorCount, F(r.targetDistance), F(r.targetSize), F(r.timeLimit),
                 F(r.successThresholdStrictness), F(r.effectiveSelectionCone), F(r.effectiveSelectionAssistRadius),
@@ -3924,7 +3926,7 @@ public class XRWorkloadProbeSceneController : MonoBehaviour
     string BuildBlockCsv()
     {
         var sb = new StringBuilder();
-        sb.AppendLine("participantId,taskType,blockId,targetDimension,ruleComplexity,targetCount,distractorCount,targetDistance,targetSize,timeLimit,successThresholdStrictness,effectiveSelectionCone,effectiveSelectionAssistRadius,gazeFallbackAllowed,feedbackDelay,controlNoise,trials,accuracy,meanDecisionRt,timeoutCount,meanPointerPath,meanPeakSpeed,totalPauseCount,totalHoverChangeCount");
+        sb.AppendLine("participantId,sessionNumber,conditionLabel,taskType,blockId,targetDimension,ruleComplexity,targetCount,distractorCount,targetDistance,targetSize,timeLimit,successThresholdStrictness,effectiveSelectionCone,effectiveSelectionAssistRadius,gazeFallbackAllowed,feedbackDelay,controlNoise,trials,accuracy,meanDecisionRt,timeoutCount,meanPointerPath,meanPeakSpeed,totalPauseCount,totalHoverChangeCount");
         foreach (ProbeBlockProfile profile in blockProfiles)
         {
             int n = 0;
@@ -3949,7 +3951,7 @@ public class XRWorkloadProbeSceneController : MonoBehaviour
             }
             if (n == 0) continue;
             sb.AppendLine(string.Join(",",
-                Csv(participantId), Csv(profile.blockId), Csv(profile.blockId), Csv(profile.targetTlxDimension),
+                Csv(participantId), I(sessionNumber), Csv(EffectiveConditionLabel()), Csv(profile.blockId), Csv(profile.blockId), Csv(profile.targetTlxDimension),
                 Mathf.Clamp(profile.ruleComplexity, 1, 3), EffectiveTargetCount(profile),
                 Mathf.Max(1, EffectiveTargetCount(profile) - 1), F(profile.targetDistance), F(profile.targetSize),
                 F(profile.timeLimitSeconds), F(Mathf.Clamp01(profile.successThresholdStrictness)),

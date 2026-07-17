@@ -7,6 +7,8 @@ internal sealed class XRWorkloadProbeBehaviorSample
     public int sampleIndex;
     public float elapsedSeconds;
     public float realtimeSeconds;
+    public bool trialActive;
+    public int trialIndex;
 
     public bool headValid;
     public Vector3 headPosition;

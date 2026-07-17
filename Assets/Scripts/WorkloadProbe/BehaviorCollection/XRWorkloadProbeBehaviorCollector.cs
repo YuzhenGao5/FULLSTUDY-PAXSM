@@ -13,8 +13,8 @@ using UnityEngine.XR;
 [RequireComponent(typeof(XRWorkloadProbeSceneController))]
 public sealed class XRWorkloadProbeBehaviorCollector : MonoBehaviour
 {
-    const string SchemaVersion = "XRWorkloadProbe_Behavior_v1.1";
-    const string AlgorithmVersion = "XRWorkloadProbe_29Metrics_v1.1";
+    const string SchemaVersion = "XRWorkloadProbe_Behavior_v1.2";
+    const string AlgorithmVersion = "XRWorkloadProbe_29Metrics_v1.2";
     const int ExpectedMetricCount = 29;
 
     [Header("Scene-only Scope")]
@@ -30,7 +30,9 @@ public sealed class XRWorkloadProbeBehaviorCollector : MonoBehaviour
     [Range(0.1f, 3f)] public float maximumRayEndpointStepMeters = 1f;
     [Range(0.5f, 5f)] public float fallbackRayProjectionDistanceMeters = 2f;
 
-    [Header("Eye Movement")]
+    [Header("Optional Eye Movement")]
+    [Tooltip("Enable only when the approved protocol includes eye tracking for this scene.")]
+    public bool collectEyeGaze = false;
     [Range(5f, 80f)] public float fixationVelocityThresholdDegreesPerSecond = 30f;
     [Range(40f, 300f)] public float saccadeVelocityThresholdDegreesPerSecond = 100f;
     [Range(0.05f, 0.5f)] public float minimumFixationSeconds = 0.1f;
@@ -39,15 +41,17 @@ public sealed class XRWorkloadProbeBehaviorCollector : MonoBehaviour
     [Range(0.02f, 0.5f)] public float handEntropyBinMeters = 0.1f;
     [Range(2f, 30f)] public float headDirectionEntropyBinDegrees = 10f;
 
+    readonly List<InputDevice> _headDevices = new List<InputDevice>();
     readonly List<InputDevice> _leftHandDevices = new List<InputDevice>();
     readonly List<InputDevice> _rightHandDevices = new List<InputDevice>();
     readonly List<InputDevice> _eyeDevices = new List<InputDevice>();
-    readonly HashSet<string> _finalizedBlockIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+    readonly HashSet<int> _finalizedPresentationOrders = new HashSet<int>();
 
     FieldInfo _trialActiveField;
     FieldInfo _questionnaireActiveField;
     FieldInfo _currentProfileField;
     FieldInfo _blockIndexField;
+    FieldInfo _trialIndexField;
     FieldInfo _trialRecordsField;
 
     Camera _mainCamera;
@@ -111,8 +115,9 @@ public sealed class XRWorkloadProbeBehaviorCollector : MonoBehaviour
 
         if (_activeBlock == null)
         {
+            int presentationOrder = CurrentPresentationOrder();
             if (trialActive && !questionnaireActive && profile != null &&
-                !_finalizedBlockIds.Contains(profile.blockId))
+                !_finalizedPresentationOrders.Contains(presentationOrder))
             {
                 BeginBlock(profile, trialRecords);
             }
@@ -177,6 +182,7 @@ public sealed class XRWorkloadProbeBehaviorCollector : MonoBehaviour
         _questionnaireActiveField = controllerType.GetField("_questionnaireActive", flags);
         _currentProfileField = controllerType.GetField("_currentProfile", flags);
         _blockIndexField = controllerType.GetField("_blockIndex", flags);
+        _trialIndexField = controllerType.GetField("_trialIndex", flags);
         _trialRecordsField = controllerType.GetField("_trialRecords", flags);
         return _trialActiveField != null &&
                _questionnaireActiveField != null &&
@@ -196,9 +202,22 @@ public sealed class XRWorkloadProbeBehaviorCollector : MonoBehaviour
     int ReadBlockIndex()
     {
         if (_blockIndexField == null || probeController == null)
-            return _finalizedBlockIds.Count;
+            return _finalizedPresentationOrders.Count;
         object value = _blockIndexField.GetValue(probeController);
-        return value is int index ? index : _finalizedBlockIds.Count;
+        return value is int index ? index : _finalizedPresentationOrders.Count;
+    }
+
+    int CurrentPresentationOrder()
+    {
+        return Mathf.Max(1, ReadBlockIndex() + 1);
+    }
+
+    int ReadTrialIndex()
+    {
+        if (_trialIndexField == null || probeController == null)
+            return -1;
+        object value = _trialIndexField.GetValue(probeController);
+        return value is int index ? index : -1;
     }
 
     XRWorkloadProbeSceneController.ProbeBlockProfile ReadCurrentProfile()
@@ -221,7 +240,7 @@ public sealed class XRWorkloadProbeBehaviorCollector : MonoBehaviour
         string condition = string.IsNullOrWhiteSpace(probeController.conditionLabel)
             ? "WorkloadProbe"
             : probeController.conditionLabel.Trim();
-        int presentationOrder = Mathf.Max(1, ReadBlockIndex() + 1);
+        int presentationOrder = CurrentPresentationOrder();
 
         _activeBlock = new XRWorkloadProbeBehaviorBlock(
             participant,
@@ -289,7 +308,7 @@ public sealed class XRWorkloadProbeBehaviorCollector : MonoBehaviour
                 WriteAtomic(rawPath, BuildRawSampleCsv(completed));
             }
 
-            _finalizedBlockIds.Add(completed.blockId);
+            _finalizedPresentationOrders.Add(completed.presentationOrder);
             Debug.Log(
                 $"[XRWorkloadProbe Behavior] Saved behavior set {completed.presentationOrder} " +
                 $"({completed.blockId}, {metrics.Count} dimension-tagged metrics, " +
@@ -313,19 +332,21 @@ public sealed class XRWorkloadProbeBehaviorCollector : MonoBehaviour
         if (_mainCamera == null)
             _mainCamera = Camera.main;
 
+        bool trialActive = ReadControllerBool(_trialActiveField);
         var sample = new XRWorkloadProbeBehaviorSample
         {
             sampleIndex = _activeBlock.samples.Count + 1,
             elapsedSeconds = Mathf.Max(0f, realtime - _activeBlock.startRealtime),
-            realtimeSeconds = realtime
+            realtimeSeconds = realtime,
+            trialActive = trialActive,
+            trialIndex = trialActive ? ReadTrialIndex() + 1 : 0
         };
 
-        if (_mainCamera != null && _mainCamera.isActiveAndEnabled)
-        {
-            sample.headValid = true;
-            sample.headPosition = _mainCamera.transform.position;
-            sample.headRotation = _mainCamera.transform.rotation;
-        }
+        sample.headValid = TryGetNodePose(
+            XRNode.Head,
+            _headDevices,
+            out sample.headPosition,
+            out sample.headRotation);
 
         sample.leftHandValid = TryGetNodePose(
             XRNode.LeftHand,
@@ -350,7 +371,8 @@ public sealed class XRWorkloadProbeBehaviorCollector : MonoBehaviour
             sample.rayEndpoint = sample.rayOrigin +
                                  sample.rayDirection * sample.rayProjectionDistanceMeters;
         }
-        sample.gazeValid = TryGetEyeGazeDirection(out sample.gazeDirection);
+        sample.gazeValid = collectEyeGaze &&
+                           TryGetEyeGazeDirection(out sample.gazeDirection);
 
         _activeBlock.AddSample(
             sample,
@@ -364,6 +386,14 @@ public sealed class XRWorkloadProbeBehaviorCollector : MonoBehaviour
         out Vector3 origin,
         out Vector3 direction)
     {
+        // A static scene transform is not evidence of a tracked controller.
+        if (!sample.rightHandValid)
+        {
+            origin = default;
+            direction = default;
+            return false;
+        }
+
         if ((_rightRayTransform == null || !_rightRayTransform.gameObject.activeInHierarchy) &&
             Time.realtimeSinceStartup >= _nextRightRaySearchRealtime)
         {
@@ -612,21 +642,6 @@ public sealed class XRWorkloadProbeBehaviorCollector : MonoBehaviour
 
     string GetOutputFolder()
     {
-#if UNITY_EDITOR
-        DirectoryInfo projectRoot = Directory.GetParent(Application.dataPath);
-        if (projectRoot != null)
-        {
-            string participant = probeController == null || string.IsNullOrWhiteSpace(probeController.participantId)
-                ? "unknown_participant"
-                : SafeFilePart(probeController.participantId.Trim());
-            return Path.Combine(
-                projectRoot.FullName,
-                "ExperimentOutputs",
-                "XRWorkloadProbe",
-                participant);
-        }
-#endif
-
         return ExperimentRunContext.IsConfigured
             ? ExperimentRunContext.ResolveOutputDirectory(probeController.outputFolderName)
             : Path.Combine(Application.persistentDataPath, probeController.outputFolderName);
@@ -641,7 +656,10 @@ public sealed class XRWorkloadProbeBehaviorCollector : MonoBehaviour
         sb.AppendLine(
             "schemaVersion,algorithmVersion,participantId,sessionNumber,conditionLabel,presentationOrder," +
             "blockId,targetDimension,expectedTrials,recordedTrials,completionReason,sampleRateHz," +
+            "observedSampleRateHz,rawSampleCount,eyeGazeCollectionEnabled," +
             "dimension,metricId,metricName,value,unit,valid,source,operationalDefinition,qualityNote");
+
+        float observedSampleRate = ObservedSampleRateHz(block);
 
         for (int i = 0; i < metrics.Count; i++)
         {
@@ -660,6 +678,9 @@ public sealed class XRWorkloadProbeBehaviorCollector : MonoBehaviour
                 (trials?.trialCount ?? 0).ToString(CultureInfo.InvariantCulture),
                 Csv(block.completionReason),
                 F(sampleRateHz),
+                observedSampleRate >= 0f ? F(observedSampleRate) : "",
+                block.samples.Count.ToString(CultureInfo.InvariantCulture),
+                B(collectEyeGaze),
                 Csv(metric.dimension),
                 Csv(metric.metricId),
                 Csv(metric.metricName),
@@ -678,8 +699,8 @@ public sealed class XRWorkloadProbeBehaviorCollector : MonoBehaviour
     {
         var sb = new StringBuilder();
         sb.AppendLine(
-            "schemaVersion,participantId,sessionNumber,presentationOrder,blockId,targetDimension," +
-            "sampleIndex,elapsedSeconds,realtimeSeconds," +
+            "schemaVersion,participantId,sessionNumber,conditionLabel,presentationOrder,blockId,targetDimension," +
+            "sampleIndex,elapsedSeconds,realtimeSeconds,trialActive,trialIndex," +
             "headValid,headX,headY,headZ,headQx,headQy,headQz,headQw," +
             "leftHandValid,leftHandX,leftHandY,leftHandZ,leftHandQx,leftHandQy,leftHandQz,leftHandQw," +
             "rightHandValid,rightHandX,rightHandY,rightHandZ,rightHandQx,rightHandQy,rightHandQz,rightHandQw," +
@@ -694,10 +715,13 @@ public sealed class XRWorkloadProbeBehaviorCollector : MonoBehaviour
             {
                 Csv(SchemaVersion), Csv(block.participantId),
                 block.sessionNumber.ToString(CultureInfo.InvariantCulture),
+                Csv(block.conditionLabel),
                 block.presentationOrder.ToString(CultureInfo.InvariantCulture),
                 Csv(block.blockId), Csv(block.targetDimension),
                 sample.sampleIndex.ToString(CultureInfo.InvariantCulture),
                 F(sample.elapsedSeconds), F(sample.realtimeSeconds),
+                B(sample.trialActive),
+                sample.trialIndex.ToString(CultureInfo.InvariantCulture),
                 B(sample.headValid), V(sample.headValid, sample.headPosition.x), V(sample.headValid, sample.headPosition.y),
                 V(sample.headValid, sample.headPosition.z), V(sample.headValid, sample.headRotation.x),
                 V(sample.headValid, sample.headRotation.y), V(sample.headValid, sample.headRotation.z),
@@ -722,6 +746,15 @@ public sealed class XRWorkloadProbeBehaviorCollector : MonoBehaviour
             }));
         }
         return sb.ToString();
+    }
+
+    static float ObservedSampleRateHz(XRWorkloadProbeBehaviorBlock block)
+    {
+        if (block == null || block.samples.Count < 2)
+            return -1f;
+        float elapsed = block.samples[block.samples.Count - 1].realtimeSeconds -
+                        block.samples[0].realtimeSeconds;
+        return elapsed > 0f ? (block.samples.Count - 1) / elapsed : -1f;
     }
 
     static void WriteAtomic(string path, string content)

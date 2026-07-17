@@ -1039,7 +1039,12 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: a7b8c9d0e1f24a5b8c6d7e8f90123456, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  questionnaireOnlyMode: 0
+  requireReadAcknowledgement: 0
+  questionnaireOnlySessionId: standalone_questionnaire
   participantId: P001
+  sessionNumber: 2
+  conditionLabel: WorkloadProbe
   randomizeWorkloadBlocks: 0
   startAutomatically: 1
   writeCsvOnQuit: 1

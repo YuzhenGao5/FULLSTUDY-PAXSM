@@ -67,5 +67,5 @@
         "*.sln": "*.csproj",
         "*.slnx": "*.csproj"
     },
-    "dotnet.defaultSolution": "FULLSTUDY-PAXSM.slnx"
+    "dotnet.defaultSolution": "My project (3).slnx"
 }
