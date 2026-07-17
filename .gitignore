@@ -50,3 +50,4 @@ Desktop.ini
 # Local study exports and analysis output
 ExportsCSV/
 AnalysisOutput/
+/ExperimentOutputs/
