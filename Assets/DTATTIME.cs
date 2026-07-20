@@ -134,77 +134,10 @@ public class AllControlStageEventReporter : MonoBehaviour
     // -----------------------------
     string ResolveRunFolderOrFallback()
     {
-        // 优先：基于 mergedExporter 的设置，找到最新 runFolder
-        if (mergedExporter != null)
-        {
-            string baseFolder = ResolveBaseFolderFromMergedExporter(mergedExporter);
-            string root = Path.Combine(baseFolder, mergedExporter.outputSubfolder);
-            Directory.CreateDirectory(root);
+        if (mergedExporter != null && !string.IsNullOrWhiteSpace(mergedExporter.LastExportDirectory))
+            return mergedExporter.LastExportDirectory;
 
-            // runFolderName 格式：
-            // {fileNamePrefix}_P{participant}_S{session}_{conditionLabel}_{timestampUTC}
-            string head = $"{mergedExporter.fileNamePrefix}_P{mergedExporter.participantNumber}_S{mergedExporter.sessionNumber}_{mergedExporter.conditionLabel}_";
-
-            string[] dirs;
-            try { dirs = Directory.GetDirectories(root); }
-            catch { dirs = Array.Empty<string>(); }
-
-            string best = null;
-            DateTime bestTime = DateTime.MinValue;
-
-            for (int i = 0; i < dirs.Length; i++)
-            {
-                string name = Path.GetFileName(dirs[i]);
-                if (string.IsNullOrEmpty(name)) continue;
-                if (!name.StartsWith(head, StringComparison.OrdinalIgnoreCase)) continue;
-
-                DateTime t = SafeLastWriteUtc(dirs[i]);
-                if (t > bestTime)
-                {
-                    bestTime = t;
-                    best = dirs[i];
-                }
-            }
-
-            // 找到就直接用（这就是“同一个文件夹”）
-            if (!string.IsNullOrEmpty(best))
-                return best;
-
-            // 如果还没找到（可能 mergedExporter 未导出/被关掉），那就创建一个新的 fallback folder
-            string stamp = DateTime.UtcNow.ToString("yyyyMMdd_HHmmss");
-            string fallback = Path.Combine(root, head + stamp);
-            return fallback;
-        }
-
-        // fallback：没有 mergedExporter，就写到 persistentDataPath/KnobLogs
-        return Path.Combine(Application.persistentDataPath, "KnobLogs");
-    }
-
-    static DateTime SafeLastWriteUtc(string dir)
-    {
-        try { return Directory.GetLastWriteTimeUtc(dir); }
-        catch { return DateTime.MinValue; }
-    }
-
-    static string ResolveBaseFolderFromMergedExporter(KnobBehaviorMergedCSVExporter ex)
-    {
-        // 复制它的 ResolveBaseFolder 逻辑（因为它是 private）
-        if (ex.outputMode == KnobBehaviorMergedCSVExporter.OutputMode.ProjectAssets)
-        {
-#if UNITY_EDITOR
-            return Application.dataPath;
-#else
-            return Application.persistentDataPath;
-#endif
-        }
-
-        if (ex.outputMode == KnobBehaviorMergedCSVExporter.OutputMode.PersistentDataPath)
-            return Application.persistentDataPath;
-
-        if (ex.outputMode == KnobBehaviorMergedCSVExporter.OutputMode.CustomAbsolutePath)
-            return string.IsNullOrEmpty(ex.customAbsoluteFolder) ? Application.persistentDataPath : ex.customAbsoluteFolder;
-
-        return Application.persistentDataPath;
+        return ExperimentRunContext.ResolveOutputDirectory("MainScene_Data");
     }
 
     // -----------------------------

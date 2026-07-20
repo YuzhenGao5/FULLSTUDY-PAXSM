@@ -5,6 +5,9 @@ using UnityEngine;
 
 public static class ExperimentRunContext
 {
+    public const string StandardOutputFolderName = "CARE-XR Data";
+    public const string StandaloneFolderName = "Standalone";
+
     [Serializable]
     public sealed class RunManifest
     {
@@ -49,11 +52,46 @@ public static class ExperimentRunContext
 #if UNITY_ANDROID && !UNITY_EDITOR
         return Path.Combine(Application.persistentDataPath, "CAREXR_Experiment_Data");
 #else
-        string documents = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
-        if (!string.IsNullOrWhiteSpace(documents))
-            return Path.Combine(documents, "CARE-XR Data");
+        string desktop = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
+        if (!string.IsNullOrWhiteSpace(desktop))
+            return Path.Combine(desktop, StandardOutputFolderName);
         return Path.Combine(Application.persistentDataPath, "CAREXR_Experiment_Data");
 #endif
+    }
+
+    public static string GetStandaloneOutputRoot()
+    {
+        string root = Path.Combine(GetDefaultOutputRoot(), StandaloneFolderName);
+        Directory.CreateDirectory(root);
+        return root;
+    }
+
+    public static string MigrateSavedOutputRoot(string savedOutputRoot)
+    {
+        if (string.IsNullOrWhiteSpace(savedOutputRoot))
+            return GetDefaultOutputRoot();
+
+#if !UNITY_ANDROID || UNITY_EDITOR
+        string documents = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+        if (!string.IsNullOrWhiteSpace(documents))
+        {
+            string legacyDefault = Path.Combine(documents, StandardOutputFolderName);
+            try
+            {
+                if (string.Equals(
+                    Path.GetFullPath(savedOutputRoot.Trim()),
+                    Path.GetFullPath(legacyDefault),
+                    StringComparison.OrdinalIgnoreCase))
+                    return GetDefaultOutputRoot();
+            }
+            catch
+            {
+                // Keep a custom saved path; validation will report malformed paths later.
+            }
+        }
+#endif
+
+        return savedOutputRoot.Trim();
     }
 
     public static bool ValidateParticipantId(string value, out string normalized, out string error)
@@ -178,7 +216,7 @@ public static class ExperimentRunContext
         }
 
         string root = string.IsNullOrWhiteSpace(fallbackRoot)
-            ? Application.persistentDataPath
+            ? GetStandaloneOutputRoot()
             : fallbackRoot;
         Directory.CreateDirectory(root);
         return root;
@@ -189,7 +227,7 @@ public static class ExperimentRunContext
         if (!IsConfigured)
         {
             string fallback = Path.Combine(
-                Application.persistentDataPath,
+                GetStandaloneOutputRoot(),
                 SafePathSegment(fallbackSubfolder, "Experiment_Data"));
             Directory.CreateDirectory(fallback);
             return fallback;

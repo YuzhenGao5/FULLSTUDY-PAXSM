@@ -1229,7 +1229,7 @@ internal sealed class MainForm : Form
 		tableLayoutPanel2.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
 		tableLayoutPanel2.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
 		tableLayoutPanel2.Controls.Add(DarkLabel("Folder"), 0, 0);
-		_exportFolderBox = CreateSettingsTextBox("C:/PAXSM_FullStudy_Data");
+		_exportFolderBox = CreateSettingsTextBox(StudyPaths.DefaultOutputFolder);
 		_exportFolderBox.TextChanged += delegate
 		{
 			ExportSettingChanged();
@@ -2527,7 +2527,7 @@ internal sealed class MainForm : Form
 	{
 		if (ExportSettingsUiReady())
 		{
-			config.outputFolder = CleanOrDefault(_exportFolderBox.Text, "C:/PAXSM_FullStudy_Data");
+			config.outputFolder = CleanOrDefault(_exportFolderBox.Text, StudyPaths.DefaultOutputFolder);
 			config.outputSubfolder = CleanOrDefault(_exportSubfolderBox.Text, "ExportsCSV");
 			config.fileNamePrefix = CleanFileToken(_fileNamePrefixBox.Text, "PAXSM");
 			config.participantNumber = Math.Max(1, (int)_participantNumberBox.Value);
@@ -2547,7 +2547,7 @@ internal sealed class MainForm : Form
 		_loadingExportSettings = true;
 		try
 		{
-			_exportFolderBox.Text = CleanOrDefault(config.outputFolder, "C:/PAXSM_FullStudy_Data");
+			_exportFolderBox.Text = CleanOrDefault(config.outputFolder, StudyPaths.DefaultOutputFolder);
 			_exportSubfolderBox.Text = CleanOrDefault(config.outputSubfolder, "ExportsCSV");
 			_fileNamePrefixBox.Text = CleanFileToken(config.fileNamePrefix, "PAXSM");
 			_participantNumberBox.Value = ClampForNumberBox(config.participantNumber);

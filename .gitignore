@@ -42,6 +42,13 @@ sysinfo.txt
 !.vscode/settings.json
 !.vscode/extensions.json
 
+# Python generated files
+__pycache__/
+*.py[cod]
+
+# JavaScript package dependencies (including generated analysis workspaces)
+node_modules/
+
 # OS files
 .DS_Store
 Thumbs.db

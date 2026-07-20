@@ -11,7 +11,7 @@ using InputSystemKeyboard = UnityEngine.InputSystem.Keyboard;
 using InputSystemMouse = UnityEngine.InputSystem.Mouse;
 #endif
 
-public class XRWorkloadProbeSceneController : MonoBehaviour
+public partial class XRWorkloadProbeSceneController : MonoBehaviour
 {
     const float RuntimeQuestionnaireKnobDiameterMeters = 0.10f;
     const string QuestionnaireSchemaVersion = "CAREXR_Questionnaire_v2.0";
@@ -429,7 +429,7 @@ public class XRWorkloadProbeSceneController : MonoBehaviour
     readonly List<InputDevice> _rightHandDevices = new List<InputDevice>();
     Transform _rightPointerTransform;
     Transform _targetAreaAnchor;
-    Transform _questionnaireRoot;
+    Transform _questionnaireRuntimeRoot;
     TextMesh _questionnaireTitleText;
     TextMesh _questionnairePromptText;
     TextMesh _questionnaireScaleText;
@@ -469,14 +469,20 @@ public class XRWorkloadProbeSceneController : MonoBehaviour
     ProbeBlockProfile _currentProfile;
     TrialRecord _currentTrial;
     Coroutine _feedbackCoroutine;
+    XRWorkloadProbeBehaviorCollector _probeBehaviorCollector;
     bool _questionnaireActive;
     bool _questionnaireStageActive;
     bool _completedExportWritten;
+    bool _lastDataIntegrityPassed = true;
+    string _lastDataIntegrityPath = "";
     int _questionnaireHoverValue = -1;
     int _questionnaireSelectedValue = -1;
 
     protected virtual void Awake()
     {
+#if UNITY_EDITOR
+        ApplySyntheticParticipantSettings();
+#endif
         if (ExperimentRunContext.IsConfigured)
             participantId = ExperimentRunContext.ParticipantIdOr(participantId);
 
@@ -485,7 +491,22 @@ public class XRWorkloadProbeSceneController : MonoBehaviour
         AddTrackedPoseDriverIfAvailable(_mainCamera.gameObject);
         if (!questionnaireOnlyMode)
             BuildDefaultProfilesIfNeeded();
+        EnsureProbeBehaviorCollector();
         BuildSceneObjects();
+    }
+
+    void EnsureProbeBehaviorCollector()
+    {
+        if (questionnaireOnlyMode ||
+            !string.Equals(gameObject.scene.name, "XRWorkloadProbeScene", StringComparison.Ordinal))
+            return;
+
+        _probeBehaviorCollector = GetComponent<XRWorkloadProbeBehaviorCollector>();
+        if (_probeBehaviorCollector == null)
+            _probeBehaviorCollector = gameObject.AddComponent<XRWorkloadProbeBehaviorCollector>();
+
+        _probeBehaviorCollector.probeController = this;
+        _probeBehaviorCollector.writeRawSamples = true;
     }
 
     protected virtual void Start()
@@ -504,6 +525,11 @@ public class XRWorkloadProbeSceneController : MonoBehaviour
 
         if (!_trialActive)
             return;
+
+#if UNITY_EDITOR
+        if (SyntheticParticipantActive && UpdateSyntheticProbeTrial())
+            return;
+#endif
 
         bool pressed = GetSelectionPressed(out Ray pointerRay, out Vector3 pointerOrigin);
         TrackPointerMotion(pointerOrigin);
@@ -576,7 +602,9 @@ public class XRWorkloadProbeSceneController : MonoBehaviour
         WriteCsvFiles("completed");
         _titleText.text = "XR Workload Probe Complete";
         _cueText.text = "All blocks are finished. Review the saved workload-probe CSV or stop the session.";
-        _statusText.text = $"Saved {_trialRecords.Count} trial records to:\n{GetOutputFolder()}";
+        _statusText.text = _lastDataIntegrityPassed
+            ? $"DATA COMPLETE: all required checks passed.\nSaved {_trialRecords.Count} trial records to:\n{GetOutputFolder()}"
+            : $"DATA INTEGRITY CHECK FAILED. Do not use this run.\nReview:\n{_lastDataIntegrityPath}";
         if (_timerText != null)
             _timerText.text = "";
         _feedbackText.text = "";
@@ -585,6 +613,12 @@ public class XRWorkloadProbeSceneController : MonoBehaviour
 
     IEnumerator RunQuestionnaireOnlyExperiment()
     {
+        if (questionnaireComparisonMode)
+        {
+            yield return RunQuestionnaireComparisonExperiment();
+            yield break;
+        }
+
         _blockIndex = 0;
         _runBlockCount = 1;
         var questionnaireSession = new ProbeBlockProfile
@@ -633,6 +667,13 @@ public class XRWorkloadProbeSceneController : MonoBehaviour
 
     IEnumerator WaitForSecondsOrN(float seconds)
     {
+#if UNITY_EDITOR
+        if (SyntheticParticipantActive)
+        {
+            yield return new WaitForSecondsRealtime(Mathf.Min(0.08f, Mathf.Max(0.01f, seconds)));
+            yield break;
+        }
+#endif
         _waitingForContinue = true;
         float end = Time.time + seconds;
         while (_waitingForContinue && Time.time < end)
@@ -1418,7 +1459,8 @@ public class XRWorkloadProbeSceneController : MonoBehaviour
         if (_selectionRayRenderer == null)
             return;
 
-        _selectionRayRenderer.enabled = showSelectionRay && (_trialActive || _questionnaireStageActive);
+        _selectionRayRenderer.enabled = showSelectionRay &&
+                                        (_trialActive || _comparisonTaskActive || _questionnaireStageActive);
         if (!_selectionRayRenderer.enabled)
             return;
 
@@ -1496,35 +1538,6 @@ public class XRWorkloadProbeSceneController : MonoBehaviour
             timeLimitSeconds = 2.25f,
             trialsPerBlock = 10,
             rationale = "Short selection window should increase perceived time pressure."
-        });
-        blockProfiles.Add(new ProbeBlockProfile
-        {
-            blockId = "performance_strict",
-            displayName = "Performance-strict",
-            targetTlxDimension = "Performance",
-            ruleComplexity = 2,
-            targetCount = 6,
-            distractorCount = 5,
-            targetDistance = 1.8f,
-            targetSize = 0.14f,
-            successThresholdStrictness = 1.0f,
-            trialsPerBlock = 10,
-            rationale = "Small targets and strict success standard should make performance feel harder to maintain."
-        });
-        blockProfiles.Add(new ProbeBlockProfile
-        {
-            blockId = "frustration_heavy",
-            displayName = "Frustration-heavy",
-            targetTlxDimension = "Frustration",
-            ruleComplexity = 1,
-            targetCount = 5,
-            distractorCount = 4,
-            targetDistance = 1.55f,
-            targetSize = 0.2f,
-            feedbackDelaySeconds = 0.9f,
-            controlNoiseDegrees = 3.5f,
-            trialsPerBlock = 10,
-            rationale = "Delayed feedback and mild control disturbance should create recoverable friction."
         });
         blockProfiles.Add(new ProbeBlockProfile
         {
@@ -1668,9 +1681,9 @@ public class XRWorkloadProbeSceneController : MonoBehaviour
             : conditionLabel.Trim();
         _mainSceneMergedExporter.outputMode = KnobBehaviorMergedCSVExporter.OutputMode.PersistentDataPath;
         _mainSceneMergedExporter.outputSubfolder = outputFolderName;
-        _mainSceneMergedExporter.fileNamePrefix = questionnaireOnlyMode
-            ? "XRQuestionnaireRead"
-            : "XRWorkloadProbe";
+        _mainSceneMergedExporter.fileNamePrefix = questionnaireComparisonMode
+            ? "PAXSMComparison"
+            : (questionnaireOnlyMode ? "XRQuestionnaireRead" : "XRWorkloadProbe");
         _mainSceneMergedExporter.autoExportOnQuit = false;
     }
 
@@ -1695,9 +1708,9 @@ public class XRWorkloadProbeSceneController : MonoBehaviour
         if (root == null)
             root = new GameObject("PAXSM_InterBlockQuestionnaire");
 
-        _questionnaireRoot = root.transform;
-        _questionnaireRoot.position = Vector3.zero;
-        _questionnaireRoot.rotation = Quaternion.identity;
+        _questionnaireRuntimeRoot = root.transform;
+        _questionnaireRuntimeRoot.position = Vector3.zero;
+        _questionnaireRuntimeRoot.rotation = Quaternion.identity;
 
         _questionnaireTitleText = CreateQuestionnaireText(
             "PAXSM_QuestionnaireTitle", new Vector3(0f, 1.98f, 4.23f), 0.024f, TextAnchor.MiddleCenter);
@@ -1719,14 +1732,14 @@ public class XRWorkloadProbeSceneController : MonoBehaviour
         _questionnaireProgressText.color = new Color(0.75f, 0.82f, 0.9f);
         _questionnaireValueText.color = new Color(1f, 0.85f, 0.25f);
 
-        _questionnaireRoot.gameObject.SetActive(false);
+        _questionnaireRuntimeRoot.gameObject.SetActive(false);
     }
 
     TextMesh CreateQuestionnaireText(string name, Vector3 worldPosition, float size, TextAnchor anchor)
     {
-        Transform existing = _questionnaireRoot.Find(name);
+        Transform existing = _questionnaireRuntimeRoot.Find(name);
         GameObject go = existing != null ? existing.gameObject : new GameObject(name);
-        go.transform.SetParent(_questionnaireRoot, false);
+        go.transform.SetParent(_questionnaireRuntimeRoot, false);
         go.transform.position = worldPosition;
         go.transform.rotation = Quaternion.identity;
 
@@ -1747,7 +1760,7 @@ public class XRWorkloadProbeSceneController : MonoBehaviour
         CalibrateQuestionnairePlacementFromHead();
         SetQuestionnaireJumpSuppressed(true);
         _questionnaireActive = true;
-        _questionnaireRoot.gameObject.SetActive(true);
+        _questionnaireRuntimeRoot.gameObject.SetActive(true);
         if (_selectionRayRenderer != null)
             _selectionRayRenderer.enabled = false;
 
@@ -1758,100 +1771,108 @@ public class XRWorkloadProbeSceneController : MonoBehaviour
         _feedbackText.text = "";
 
         TlxItem[] items = BuildTlxItems();
-        for (int i = 0; i < items.Length; i++)
+        if (questionnaireComparisonMode &&
+            questionnaireInputMethod == QuestionnaireInputMethod.PointAndClick)
         {
-            TlxItem item = items[i];
-            var record = new QuestionnaireRecord
+            yield return RunClassicPointClickQuestionnaire(profile, items);
+        }
+        else
+        {
+            for (int i = 0; i < items.Length; i++)
             {
-                blockId = profile.blockId,
-                targetDimension = profile.targetTlxDimension,
-                presentationOrder = _blockIndex + 1,
-                itemIndex = i + 1,
-                itemId = item.itemId,
-                itemDimension = item.dimension,
-                prompt = item.prompt,
-                leftAnchor = item.leftAnchor,
-                rightAnchor = item.rightAnchor,
-                responseMode = useMainSceneKnobRig ? "paxsm_main_scene_knobrig" : "paxsm_generated_fallback_knob",
-                scale = questionnaireScale
-            };
+                TlxItem item = items[i];
+                var record = new QuestionnaireRecord
+                {
+                    blockId = profile.blockId,
+                    targetDimension = profile.targetTlxDimension,
+                    presentationOrder = _blockIndex + 1,
+                    itemIndex = i + 1,
+                    itemId = item.itemId,
+                    itemDimension = item.dimension,
+                    prompt = item.prompt,
+                    leftAnchor = item.leftAnchor,
+                    rightAnchor = item.rightAnchor,
+                    responseMode = CurrentQuestionnaireResponseMode(),
+                    scale = questionnaireScale
+                };
 
-            if (requireReadAcknowledgement)
-            {
-                yield return RunQuestionnaireReadStage(
-                    $"Read  {i + 1}/{items.Length}",
-                    item.prompt,
+                if (requireReadAcknowledgement)
+                {
+                    yield return RunQuestionnaireReadStage(
+                        $"Read  {i + 1}/{items.Length}",
+                        item.prompt,
+                        item.leftAnchor,
+                        item.rightAnchor,
+                        questionnaireScale,
+                        record);
+                }
+
+                var answerStats = new QuestionnaireMotionStats();
+                string answerPrompt = item.prompt;
+                yield return RunQuestionnaireSelectionStage(
+                    profile,
+                    $"{item.dimension}  {i + 1}/{items.Length}",
+                    answerPrompt,
                     item.leftAnchor,
                     item.rightAnchor,
                     questionnaireScale,
-                    record);
-            }
-
-            var answerStats = new QuestionnaireMotionStats();
-            string answerPrompt = item.prompt;
-            yield return RunQuestionnaireSelectionStage(
-                profile,
-                $"{item.dimension}  {i + 1}/{items.Length}",
-                answerPrompt,
-                item.leftAnchor,
-                item.rightAnchor,
-                questionnaireScale,
-                "",
-                false,
-                answerStats,
-                record,
-                "Answer");
-
-            record.selectedScore = _questionnaireSelectedValue;
-            record.answerRt = answerStats.duration;
-            record.answerConfirmHoldRt = answerStats.confirmHoldDuration;
-            record.answerDecisionRt = Mathf.Max(0f, answerStats.duration - answerStats.confirmHoldDuration);
-            record.answerFirstInteractionRt = answerStats.firstInteractionRt;
-            record.answerEnterRealtime = answerStats.stageStartTime;
-            record.answerExitRealtime = answerStats.stageEndTime;
-            record.answerConfirmAttemptCount = answerStats.confirmAttemptCount;
-            record.answerConfirmCancelCount = answerStats.confirmCancelCount;
-            record.answerGrabCount = answerStats.grabCount;
-            CopyQuestionnaireStats(answerStats, record, answerStage: true);
-
-            if (collectConfidenceAfterEachItem)
-            {
-                var confidenceStats = new QuestionnaireMotionStats();
-                yield return RunQuestionnaireSelectionStage(
-                    profile,
-                    $"Confidence  {i + 1}/{items.Length}",
-                    $"How confident are you in your {item.dimension} rating?",
-                    "Not confident",
-                    "Very confident",
-                    questionnaireConfidenceScale,
                     "",
-                    true,
-                    confidenceStats,
+                    false,
+                    answerStats,
                     record,
-                    "Confidence");
+                    "Answer");
 
-                record.confidence = _questionnaireSelectedValue;
-                record.confidenceRt = confidenceStats.duration;
-                record.confidenceConfirmHoldRt = confidenceStats.confirmHoldDuration;
-                record.confidenceDecisionRt = Mathf.Max(0f, confidenceStats.duration - confidenceStats.confirmHoldDuration);
-                record.confidenceFirstInteractionRt = confidenceStats.firstInteractionRt;
-                record.confidenceEnterRealtime = confidenceStats.stageStartTime;
-                record.confidenceExitRealtime = confidenceStats.stageEndTime;
-                record.confidenceConfirmAttemptCount = confidenceStats.confirmAttemptCount;
-                record.confidenceConfirmCancelCount = confidenceStats.confirmCancelCount;
-                record.confidenceGrabCount = confidenceStats.grabCount;
-                CopyQuestionnaireStats(confidenceStats, record, answerStage: false);
-            }
-            else
-            {
-                record.confidence = -1;
-            }
+                record.selectedScore = _questionnaireSelectedValue;
+                record.answerRt = answerStats.duration;
+                record.answerConfirmHoldRt = answerStats.confirmHoldDuration;
+                record.answerDecisionRt = Mathf.Max(0f, answerStats.duration - answerStats.confirmHoldDuration);
+                record.answerFirstInteractionRt = answerStats.firstInteractionRt;
+                record.answerEnterRealtime = answerStats.stageStartTime;
+                record.answerExitRealtime = answerStats.stageEndTime;
+                record.answerConfirmAttemptCount = answerStats.confirmAttemptCount;
+                record.answerConfirmCancelCount = answerStats.confirmCancelCount;
+                record.answerGrabCount = answerStats.grabCount;
+                CopyQuestionnaireStats(answerStats, record, answerStage: true);
 
-            _questionnaireRecords.Add(record);
-            AppendMainSceneCompatibleSummaries(record);
-            if (questionnaireOnlyMode)
+                if (collectConfidenceAfterEachItem)
+                {
+                    var confidenceStats = new QuestionnaireMotionStats();
+                    yield return RunQuestionnaireSelectionStage(
+                        profile,
+                        $"Confidence  {i + 1}/{items.Length}",
+                        $"How confident are you in your {item.dimension} rating?",
+                        "Not confident",
+                        "Very confident",
+                        questionnaireConfidenceScale,
+                        "",
+                        true,
+                        confidenceStats,
+                        record,
+                        "Confidence");
+
+                    record.confidence = _questionnaireSelectedValue;
+                    record.confidenceRt = confidenceStats.duration;
+                    record.confidenceConfirmHoldRt = confidenceStats.confirmHoldDuration;
+                    record.confidenceDecisionRt = Mathf.Max(0f, confidenceStats.duration - confidenceStats.confirmHoldDuration);
+                    record.confidenceFirstInteractionRt = confidenceStats.firstInteractionRt;
+                    record.confidenceEnterRealtime = confidenceStats.stageStartTime;
+                    record.confidenceExitRealtime = confidenceStats.stageEndTime;
+                    record.confidenceConfirmAttemptCount = confidenceStats.confirmAttemptCount;
+                    record.confidenceConfirmCancelCount = confidenceStats.confirmCancelCount;
+                    record.confidenceGrabCount = confidenceStats.grabCount;
+                    CopyQuestionnaireStats(confidenceStats, record, answerStage: false);
+                }
+                else
+                {
+                    record.confidence = -1;
+                }
+
+                _questionnaireRecords.Add(record);
+                if (IsQuestionnaireKnobInputActive)
+                    AppendMainSceneCompatibleSummaries(record);
                 WriteQuestionnaireLiveCheckpoint();
-            yield return new WaitForSeconds(0.2f);
+                yield return new WaitForSeconds(0.2f);
+            }
         }
 
         ClearQuestionnaireTicks();
@@ -1865,7 +1886,7 @@ public class XRWorkloadProbeSceneController : MonoBehaviour
         _questionnaireValueText.text = "";
         yield return WaitForSecondsOrN(1.25f);
 
-        _questionnaireRoot.gameObject.SetActive(false);
+        _questionnaireRuntimeRoot.gameObject.SetActive(false);
         _questionnaireActive = false;
         _questionnaireStageActive = false;
         SetQuestionnaireJumpSuppressed(false);
@@ -1895,6 +1916,10 @@ public class XRWorkloadProbeSceneController : MonoBehaviour
         record.readExitEvent = "primary_button_a";
         LogQuestionnaireStageEvent(record, "Read", "Enter");
         LogQuestionnaireInteractionEvent(record, "Read", "StageEnter", "prompt_only");
+
+#if UNITY_EDITOR
+        BeginSyntheticQuestionnaireRead(record);
+#endif
 
         while (IsQuestionnaireReadContinueHeldNow())
             yield return null;
@@ -2197,9 +2222,10 @@ public class XRWorkloadProbeSceneController : MonoBehaviour
         QuestionnaireRecord record,
         string stageName)
     {
+        bool pointAndClick = questionnaireInputMethod == QuestionnaireInputMethod.PointAndClick;
         _questionnaireStageActive = true;
         _questionnaireSelectedValue = -1;
-        _questionnaireHoverValue = Mathf.CeilToInt(scale * 0.5f);
+        _questionnaireHoverValue = pointAndClick ? -1 : Mathf.CeilToInt(scale * 0.5f);
         SetupQuestionnaireScale(scale);
         UpdateQuestionnaireTickVisuals(_questionnaireHoverValue, _questionnaireSelectedValue);
 
@@ -2207,8 +2233,8 @@ public class XRWorkloadProbeSceneController : MonoBehaviour
         _questionnairePromptText.text = WrapForWall(prompt, 62);
         _questionnaireScaleText.text = leftAnchor;
         _questionnaireScaleRightText.text = rightAnchor;
-        _questionnaireProgressText.text = progress;
-        _questionnaireValueText.text = $"{_questionnaireHoverValue}";
+        _questionnaireProgressText.text = pointAndClick ? "POINT AND CLICK" : progress;
+        _questionnaireValueText.text = pointAndClick ? "Aim at a value" : $"{_questionnaireHoverValue}";
 
         stats.stageStartTime = Time.realtimeSinceStartup;
         stats.lastSampleTime = stats.stageStartTime;
@@ -2224,25 +2250,79 @@ public class XRWorkloadProbeSceneController : MonoBehaviour
         _activeQuestionnaireRecord = record;
         _activeQuestionnaireStageName = stageName;
         AddQuestionnaireTraceSample(stats, _questionnaireHoverValue, "stage_enter", "system", isAnchor: true);
-        ResetQuestionnaireConfirmHold(IsQuestionnaireConfirmHeldNow());
+        if (pointAndClick)
+            _comparisonPointClickWasHeld = ComparisonPointClickHeldNow();
+        else
+            ResetQuestionnaireConfirmHold(IsQuestionnaireConfirmHeldNow());
         LogQuestionnaireStageEvent(record, stageName, "Enter");
-        LogQuestionnaireInteractionEvent(record, stageName, "StageEnter", $"scale={scale}");
+        LogQuestionnaireInteractionEvent(
+            record,
+            stageName,
+            "StageEnter",
+            $"scale={scale};responseMode={CurrentQuestionnaireResponseMode()}");
+
+#if UNITY_EDITOR
+        BeginSyntheticQuestionnaireStage(record, stageName, scale, pointAndClick);
+#endif
 
         while (_questionnaireSelectedValue < 0)
         {
             HandleQuestionnaireKeyboard(scale);
 
-            bool hasGrabKnob = _paxsmQuestionnaireKnobCore != null && _paxsmQuestionnaireGrab != null;
+#if UNITY_EDITOR
+            if (SyntheticParticipantActive && !pointAndClick)
+                UpdateSyntheticKnobQuestionnaire();
+#endif
+
+            bool pointClickPressed = false;
+            bool hasGrabKnob = !pointAndClick &&
+                               _paxsmQuestionnaireKnobCore != null &&
+                               _paxsmQuestionnaireGrab != null;
+            bool knobGrabbing = hasGrabKnob && QuestionnaireGrabIsActive();
             if (hasGrabKnob)
             {
                 _questionnaireHoverValue = _paxsmQuestionnaireKnobCore.CurrentSlot;
-                if (_paxsmQuestionnaireGrab.IsGrabbing)
+                if (knobGrabbing)
                     MarkQuestionnaireFirstInteraction(stats, Time.realtimeSinceStartup);
-                TrackQuestionnaireGrabState(stats, _paxsmQuestionnaireGrab.IsGrabbing);
-                TrackQuestionnairePhysicalSpeed(stats, _paxsmQuestionnaireGrab.IsGrabbing);
+                TrackQuestionnaireGrabState(stats, knobGrabbing);
+                TrackQuestionnairePhysicalSpeed(stats, knobGrabbing);
                 TrackQuestionnaireKnobDwell(stats);
                 if (_selectionRayRenderer != null)
                     _selectionRayRenderer.enabled = false;
+            }
+            else if (pointAndClick)
+            {
+#if UNITY_EDITOR
+                Ray pointerRay;
+                Vector3 pointerOrigin;
+                int hoverValue;
+                if (SyntheticParticipantActive)
+                {
+                    pointClickPressed = UpdateSyntheticPointClickQuestionnaire(
+                        out hoverValue,
+                        out pointerRay,
+                        out pointerOrigin);
+                }
+                else
+                {
+                    pointClickPressed = GetComparisonPointClickPressed(out pointerRay, out pointerOrigin);
+                    hoverValue = ResolveQuestionnairePointClickValue(pointerRay);
+                }
+#else
+                pointClickPressed = GetComparisonPointClickPressed(out Ray pointerRay, out Vector3 pointerOrigin);
+                int hoverValue = ResolveQuestionnairePointClickValue(pointerRay);
+#endif
+                if (hoverValue != _questionnaireHoverValue)
+                {
+                    _questionnaireHoverValue = hoverValue;
+                    if (hoverValue > 0)
+                    {
+                        AddQuestionnaireTraceSample(stats, hoverValue, "slot_change", "point_and_click", isAnchor: false);
+                        MarkQuestionnaireFirstInteraction(stats, Time.realtimeSinceStartup);
+                    }
+                }
+                TrackQuestionnairePointerMotion(pointerOrigin, stats);
+                UpdateSelectionRayVisual(pointerRay);
             }
             else
             {
@@ -2258,24 +2338,42 @@ public class XRWorkloadProbeSceneController : MonoBehaviour
                 UpdateSelectionRayVisual(pointerRay);
             }
 
-            SampleQuestionnaireTrace(stats, _questionnaireHoverValue, hasGrabKnob ? "paxsm_knob" : "pointer");
+            string traceSource = hasGrabKnob
+                ? "paxsm_knob"
+                : (pointAndClick ? "point_and_click" : "pointer");
+            SampleQuestionnaireTrace(stats, _questionnaireHoverValue, traceSource);
 
             UpdateQuestionnaireTickVisuals(_questionnaireHoverValue, _questionnaireSelectedValue);
-            _questionnaireValueText.text = $"{_questionnaireHoverValue}";
+            _questionnaireValueText.text = _questionnaireHoverValue > 0
+                ? $"{_questionnaireHoverValue}"
+                : "Aim at a value";
 
             bool canConfirm = _questionnaireHoverValue > 0 &&
-                              (!hasGrabKnob || !_paxsmQuestionnaireGrab.IsGrabbing);
-            if (UpdateQuestionnaireConfirmHold(canConfirm, stats))
+                              (!hasGrabKnob || !knobGrabbing);
+            bool confirmed = pointAndClick
+                ? pointClickPressed && canConfirm
+                : UpdateQuestionnaireConfirmHold(canConfirm, stats);
+            if (confirmed)
             {
                 _questionnaireSelectedValue = _questionnaireHoverValue;
                 stats.confirmCount++;
+                if (pointAndClick)
+                {
+                    stats.confirmAttemptCount++;
+                    stats.confirmHoldDuration = 0f;
+                    TryPlayRightHandHaptic(0.42f, 0.07f, force: true);
+                }
                 stats.stageEndTime = Time.realtimeSinceStartup;
                 AddQuestionnaireTraceSample(stats, _questionnaireSelectedValue, "stage_exit", "system", isAnchor: true);
                 FinalizeQuestionnaireStage(stats, scale);
                 AppendQuestionnaireRawTraceRecords(record, stageName, stats);
                 LogQuestionnaireStageEvent(record, stageName, "Confirm");
                 LogQuestionnaireStageEvent(record, stageName, "Exit");
-                LogQuestionnaireInteractionEvent(record, stageName, "Confirmed", $"slot={_questionnaireSelectedValue}");
+                LogQuestionnaireInteractionEvent(
+                    record,
+                    stageName,
+                    pointAndClick ? "PointClickConfirmed" : "Confirmed",
+                    $"slot={_questionnaireSelectedValue}");
                 LogQuestionnaireInteractionEvent(record, stageName, "StageExit", $"rt={F(stats.duration)}");
             }
 
@@ -2287,7 +2385,8 @@ public class XRWorkloadProbeSceneController : MonoBehaviour
         _activeQuestionnaireStageName = "";
         UpdateQuestionnaireTickVisuals(_questionnaireHoverValue, _questionnaireSelectedValue);
         _questionnaireValueText.text = $"Confirmed: {_questionnaireSelectedValue}";
-        UpdateQuestionnaireConfirmVisual(1f, confirmed: true);
+        if (!pointAndClick)
+            UpdateQuestionnaireConfirmVisual(1f, confirmed: true);
         yield return new WaitForSeconds(0.35f);
         _questionnaireStageActive = false;
         if (_selectionRayRenderer != null)
@@ -2386,7 +2485,27 @@ public class XRWorkloadProbeSceneController : MonoBehaviour
 
     bool ShouldRecordQuestionnairePersonalSpeed()
     {
-        return questionnaireOnlyMode && recordQuestionnairePersonalSpeed;
+        return recordQuestionnairePersonalSpeed && IsQuestionnaireKnobInputActive;
+    }
+
+    bool QuestionnaireGrabIsActive()
+    {
+#if UNITY_EDITOR
+        if (SyntheticParticipantActive)
+            return SyntheticQuestionnaireGrabbing();
+#endif
+        return _paxsmQuestionnaireGrab != null && _paxsmQuestionnaireGrab.IsGrabbing;
+    }
+
+    float QuestionnaireCurrentTwistDegrees()
+    {
+#if UNITY_EDITOR
+        if (SyntheticParticipantActive)
+            return SyntheticQuestionnaireTwistDegrees();
+#endif
+        return _paxsmQuestionnaireGrab != null
+            ? _paxsmQuestionnaireGrab.CurrentTwistDegrees
+            : 0f;
     }
 
     void TrackQuestionnairePhysicalSpeed(QuestionnaireMotionStats stats, bool grabbing)
@@ -2396,7 +2515,7 @@ public class XRWorkloadProbeSceneController : MonoBehaviour
             return;
 
         float now = Time.realtimeSinceStartup;
-        float twist = _paxsmQuestionnaireGrab.CurrentTwistDegrees;
+        float twist = QuestionnaireCurrentTwistDegrees();
         if (!stats.hasPhysicalSpeedBaseline)
         {
             stats.hasPhysicalSpeedBaseline = true;
@@ -2572,6 +2691,10 @@ public class XRWorkloadProbeSceneController : MonoBehaviour
         ClearQuestionnaireTicks();
         _questionnaireCurrentScale = scale;
         BuildQuestionnaireWallScale(scale);
+
+        if (questionnaireInputMethod == QuestionnaireInputMethod.PointAndClick)
+            return;
+
         BuildQuestionnaireKnobPanel();
 
         if (useMainSceneKnobRig && TrySetupMainSceneKnobRig(scale))
@@ -2582,7 +2705,7 @@ public class XRWorkloadProbeSceneController : MonoBehaviour
 
         _questionnaireKnobFace = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
         _questionnaireKnobFace.name = "PAXSM_KnobFace";
-        _questionnaireKnobFace.transform.SetParent(_questionnaireRoot, false);
+        _questionnaireKnobFace.transform.SetParent(_questionnaireRuntimeRoot, false);
         _questionnaireKnobFace.transform.position = center;
         _questionnaireKnobFace.transform.rotation = QuestionnairePanelRotation() * Quaternion.Euler(90f, 0f, 0f);
         _questionnaireKnobFace.transform.localScale = new Vector3(radius * 1.55f, 0.075f, radius * 1.55f);
@@ -2593,7 +2716,7 @@ public class XRWorkloadProbeSceneController : MonoBehaviour
 
         _questionnaireKnobPointer = GameObject.CreatePrimitive(PrimitiveType.Cube);
         _questionnaireKnobPointer.name = "PAXSM_KnobPointer";
-        _questionnaireKnobPointer.transform.SetParent(_questionnaireRoot, false);
+        _questionnaireKnobPointer.transform.SetParent(_questionnaireRuntimeRoot, false);
         Renderer pointerRenderer = _questionnaireKnobPointer.GetComponent<Renderer>();
         if (pointerRenderer != null)
             pointerRenderer.sharedMaterial = _questionnaireSelectedMaterial;
@@ -2601,7 +2724,7 @@ public class XRWorkloadProbeSceneController : MonoBehaviour
 
         _questionnaireKnobHub = GameObject.CreatePrimitive(PrimitiveType.Sphere);
         _questionnaireKnobHub.name = "PAXSM_KnobHub";
-        _questionnaireKnobHub.transform.SetParent(_questionnaireRoot, false);
+        _questionnaireKnobHub.transform.SetParent(_questionnaireRuntimeRoot, false);
         _questionnaireKnobHub.transform.position = center + QuestionnairePanelFront() * 0.055f;
         _questionnaireKnobHub.transform.localScale = Vector3.one * 0.12f;
         Renderer hubRenderer = _questionnaireKnobHub.GetComponent<Renderer>();
@@ -2616,7 +2739,7 @@ public class XRWorkloadProbeSceneController : MonoBehaviour
             Vector3 dir = QuestionnaireKnobDirection(angle);
             GameObject tick = GameObject.CreatePrimitive(PrimitiveType.Cube);
             tick.name = $"PAXSM_KnobTick_{value:00}";
-            tick.transform.SetParent(_questionnaireRoot, false);
+            tick.transform.SetParent(_questionnaireRuntimeRoot, false);
             tick.transform.position = center + dir * radius + QuestionnairePanelFront() * 0.055f;
             tick.transform.rotation = Quaternion.LookRotation(QuestionnairePanelFront(), dir);
             bool major = value == 1 || value == scale || value == Mathf.CeilToInt(scale * 0.5f) || (scale == 21 && (value - 1) % 5 == 0);
@@ -2666,6 +2789,7 @@ public class XRWorkloadProbeSceneController : MonoBehaviour
             }
         }
         _questionnaireWallTicks.Clear();
+        ClearQuestionnairePointClickTargets();
 
         _questionnaireKnobFace = null;
         _questionnaireKnobPointer = null;
@@ -2685,6 +2809,9 @@ public class XRWorkloadProbeSceneController : MonoBehaviour
     void UpdateQuestionnaireTickVisuals(int hoverValue, int selectedValue)
     {
         UpdateQuestionnaireWallScaleVisuals(hoverValue, selectedValue);
+
+        if (questionnaireInputMethod == QuestionnaireInputMethod.PointAndClick)
+            return;
 
         if (_paxsmQuestionnaireKnobCore != null)
         {
@@ -2748,7 +2875,7 @@ public class XRWorkloadProbeSceneController : MonoBehaviour
         if (prefab == null)
             return false;
 
-        _paxsmKnobRigInstance = Instantiate(prefab, _questionnaireRoot);
+        _paxsmKnobRigInstance = Instantiate(prefab, _questionnaireRuntimeRoot);
         _paxsmKnobRigInstance.name = "PAXSM_MainSceneKnobRig_Runtime";
         _paxsmKnobRigInstance.transform.position = QuestionnaireKnobCenter();
         _paxsmKnobRigInstance.transform.rotation = QuestionnairePanelRotation() * Quaternion.Euler(-90f, 0f, 0f);
@@ -2905,16 +3032,21 @@ public class XRWorkloadProbeSceneController : MonoBehaviour
 
             GameObject tick = GameObject.CreatePrimitive(PrimitiveType.Cube);
             tick.name = $"PAXSM_WallScaleTick_{value:00}";
-            tick.transform.SetParent(_questionnaireRoot, false);
+            tick.transform.SetParent(_questionnaireRuntimeRoot, false);
             tick.transform.position = new Vector3(Mathf.Lerp(left, right, t), y, z);
-            tick.transform.localScale = new Vector3(major ? 0.045f : 0.026f, major ? 0.18f : 0.11f, 0.035f);
+            bool pointAndClick = questionnaireInputMethod == QuestionnaireInputMethod.PointAndClick;
+            tick.transform.localScale = pointAndClick
+                ? QuestionnairePointClickTickScale(scale, hover: false, selected: false)
+                : new Vector3(major ? 0.045f : 0.026f, major ? 0.18f : 0.11f, 0.035f);
             Collider collider = tick.GetComponent<Collider>();
             if (collider != null)
-                collider.enabled = false;
+                collider.enabled = pointAndClick;
             Renderer renderer = tick.GetComponent<Renderer>();
             if (renderer != null)
                 renderer.sharedMaterial = _questionnaireTickMaterial;
             _questionnaireWallTicks.Add(tick);
+            if (pointAndClick)
+                RegisterQuestionnairePointClickTarget(tick, value, scale);
         }
     }
 
@@ -2924,7 +3056,7 @@ public class XRWorkloadProbeSceneController : MonoBehaviour
 
         GameObject panel = GameObject.CreatePrimitive(PrimitiveType.Cube);
         panel.name = "PAXSM_KnobBackingPanel";
-        panel.transform.SetParent(_questionnaireRoot, false);
+        panel.transform.SetParent(_questionnaireRuntimeRoot, false);
         panel.transform.position = QuestionnairePanelPoint(new Vector3(0f, -0.005f, 0.045f));
         panel.transform.rotation = QuestionnairePanelRotation();
         panel.transform.localScale = new Vector3(0.20f, 0.21f, 0.03f);
@@ -2938,7 +3070,7 @@ public class XRWorkloadProbeSceneController : MonoBehaviour
 
         _questionnaireConfirmTrack = GameObject.CreatePrimitive(PrimitiveType.Cube);
         _questionnaireConfirmTrack.name = "PAXSM_ConfirmProgressTrack";
-        _questionnaireConfirmTrack.transform.SetParent(_questionnaireRoot, false);
+        _questionnaireConfirmTrack.transform.SetParent(_questionnaireRuntimeRoot, false);
         _questionnaireConfirmTrack.transform.position = QuestionnairePanelPoint(new Vector3(0f, -0.085f, -0.035f));
         _questionnaireConfirmTrack.transform.rotation = QuestionnairePanelRotation();
         _questionnaireConfirmTrack.transform.localScale = new Vector3(0.16f, 0.008f, 0.008f);
@@ -2952,7 +3084,7 @@ public class XRWorkloadProbeSceneController : MonoBehaviour
 
         _questionnaireConfirmFill = GameObject.CreatePrimitive(PrimitiveType.Cube);
         _questionnaireConfirmFill.name = "PAXSM_ConfirmProgressFill";
-        _questionnaireConfirmFill.transform.SetParent(_questionnaireRoot, false);
+        _questionnaireConfirmFill.transform.SetParent(_questionnaireRuntimeRoot, false);
         _questionnaireConfirmFill.transform.rotation = QuestionnairePanelRotation();
         Collider fillCollider = _questionnaireConfirmFill.GetComponent<Collider>();
         if (fillCollider != null)
@@ -2963,7 +3095,7 @@ public class XRWorkloadProbeSceneController : MonoBehaviour
         _questionnairePanelObjects.Add(_questionnaireConfirmFill);
 
         GameObject hintObject = new GameObject("PAXSM_KnobHint");
-        hintObject.transform.SetParent(_questionnaireRoot, false);
+        hintObject.transform.SetParent(_questionnaireRuntimeRoot, false);
         hintObject.transform.position = QuestionnairePanelPoint(new Vector3(0f, -0.115f, -0.03f));
         hintObject.transform.rotation = QuestionnairePanelRotation();
         _questionnaireKnobHintText = hintObject.AddComponent<TextMesh>();
@@ -2979,6 +3111,7 @@ public class XRWorkloadProbeSceneController : MonoBehaviour
 
     void UpdateQuestionnaireWallScaleVisuals(int hoverValue, int selectedValue)
     {
+        bool pointAndClick = questionnaireInputMethod == QuestionnaireInputMethod.PointAndClick;
         for (int i = 0; i < _questionnaireWallTicks.Count; i++)
         {
             GameObject tick = _questionnaireWallTicks[i];
@@ -2996,6 +3129,15 @@ public class XRWorkloadProbeSceneController : MonoBehaviour
             if (renderer != null)
                 renderer.sharedMaterial = confirmed ? _questionnaireSelectedMaterial :
                     (pending ? _questionnaireHoverMaterial : _questionnaireTickMaterial);
+
+            if (pointAndClick)
+            {
+                tick.transform.localScale = QuestionnairePointClickTickScale(
+                    _questionnaireWallTicks.Count,
+                    pending,
+                    confirmed);
+                continue;
+            }
 
             float width = confirmed ? 0.075f : (pending ? 0.065f : (major ? 0.045f : 0.026f));
             float height = confirmed ? 0.30f : (pending ? 0.25f : (major ? 0.18f : 0.11f));
@@ -3064,7 +3206,7 @@ public class XRWorkloadProbeSceneController : MonoBehaviour
             _activeQuestionnaireRecord == null)
             return;
 
-        bool grabbing = _paxsmQuestionnaireGrab != null && _paxsmQuestionnaireGrab.IsGrabbing;
+        bool grabbing = QuestionnaireGrabIsActive();
         bool hasBaseline = stats.hasSlotSpeedBaseline && stats.slotSpeedBaselineSlot > 0;
         int fromSlot = hasBaseline ? stats.slotSpeedBaselineSlot : stats.lastSlot;
         int deltaSlots = toSlot - fromSlot;
@@ -3126,9 +3268,7 @@ public class XRWorkloadProbeSceneController : MonoBehaviour
             slotsPerSecond = slotsPerSecond,
             slotAngleDegrees = slotAngleDegrees,
             detentAngularSpeedDps = detentAngularSpeedDps,
-            wristTwistDegrees = _paxsmQuestionnaireGrab != null
-                ? _paxsmQuestionnaireGrab.CurrentTwistDegrees
-                : 0f,
+            wristTwistDegrees = QuestionnaireCurrentTwistDegrees(),
             latestPhysicalAngularSpeedDps = stats.latestPhysicalAngularSpeedDps,
             validForCalibration = valid,
             exclusionReason = exclusionReason
@@ -3510,6 +3650,10 @@ public class XRWorkloadProbeSceneController : MonoBehaviour
 
     bool IsQuestionnaireConfirmHeldNow()
     {
+#if UNITY_EDITOR
+        if (SyntheticParticipantActive)
+            return SyntheticQuestionnaireConfirmHeld();
+#endif
         bool held = false;
         InputDevices.GetDevicesAtXRNode(XRNode.RightHand, _rightHandDevices);
         for (int i = 0; i < _rightHandDevices.Count; i++)
@@ -3534,6 +3678,10 @@ public class XRWorkloadProbeSceneController : MonoBehaviour
 
     bool IsQuestionnaireReadContinueHeldNow()
     {
+#if UNITY_EDITOR
+        if (SyntheticParticipantActive)
+            return SyntheticQuestionnaireReadHeld();
+#endif
         bool held = false;
         InputDevices.GetDevicesAtXRNode(XRNode.RightHand, _rightHandDevices);
         for (int i = 0; i < _rightHandDevices.Count; i++)
@@ -3774,16 +3922,24 @@ public class XRWorkloadProbeSceneController : MonoBehaviour
 
     void WriteCsvFiles(string reason)
     {
+        if (!questionnaireOnlyMode)
+        {
+            if (_probeBehaviorCollector == null)
+                _probeBehaviorCollector = GetComponent<XRWorkloadProbeBehaviorCollector>();
+            _probeBehaviorCollector?.FlushForExport(reason);
+        }
+
         string folder = GetOutputFolder();
         Directory.CreateDirectory(folder);
         string stamp = DateTime.Now.ToString("yyyyMMdd_HHmmss", CultureInfo.InvariantCulture);
         var savedPaths = new List<string>();
+        WriteComparisonOutputs(folder, stamp, reason, savedPaths);
         if (!questionnaireOnlyMode)
         {
             string trialPath = Path.Combine(folder, $"WorkloadProbe_Trials_{participantId}_{stamp}_{reason}.csv");
             string blockPath = Path.Combine(folder, $"WorkloadProbe_Blocks_{participantId}_{stamp}_{reason}.csv");
-            File.WriteAllText(trialPath, BuildTrialCsv(), Encoding.UTF8);
-            File.WriteAllText(blockPath, BuildBlockCsv(), Encoding.UTF8);
+            WriteCheckpointFile(trialPath, BuildTrialCsv());
+            WriteCheckpointFile(blockPath, BuildBlockCsv());
             savedPaths.Add(trialPath);
             savedPaths.Add(blockPath);
         }
@@ -3791,8 +3947,8 @@ public class XRWorkloadProbeSceneController : MonoBehaviour
         string suffix = $"{participantId}_{stamp}_{reason}";
         string questionnairePath = Path.Combine(folder, $"CAREXR_Questionnaire_{suffix}.csv");
         string stageEventsPath = Path.Combine(folder, $"CAREXR_Questionnaire_StageEvents_{suffix}.csv");
-        File.WriteAllText(questionnairePath, BuildQuestionnaireCsv(), Encoding.UTF8);
-        File.WriteAllText(stageEventsPath, BuildQuestionnaireStageEventsCsv(), Encoding.UTF8);
+        WriteCheckpointFile(questionnairePath, BuildQuestionnaireCsv());
+        WriteCheckpointFile(stageEventsPath, BuildQuestionnaireStageEventsCsv());
         savedPaths.Add(questionnairePath);
         savedPaths.Add(stageEventsPath);
 
@@ -3806,12 +3962,12 @@ public class XRWorkloadProbeSceneController : MonoBehaviour
             string physicalSpeedPath = Path.Combine(folder, $"CAREXR_Questionnaire_PhysicalSpeedSamples_{suffix}.csv");
             string slotSpeedPath = Path.Combine(folder, $"CAREXR_Questionnaire_SlotSpeedEvents_{suffix}.csv");
             string speedSummaryPath = Path.Combine(folder, $"CAREXR_Questionnaire_SpeedSummary_{suffix}.csv");
-            File.WriteAllText(rawTracePath, BuildQuestionnaireRawTraceCsv(), Encoding.UTF8);
-            File.WriteAllText(interactionPath, BuildQuestionnaireInteractionEventsCsv(), Encoding.UTF8);
-            File.WriteAllText(metadataPath, BuildQuestionnaireMetadataCsv(), Encoding.UTF8);
-            File.WriteAllText(physicalSpeedPath, BuildQuestionnairePhysicalSpeedSamplesCsv(), Encoding.UTF8);
-            File.WriteAllText(slotSpeedPath, BuildQuestionnaireSlotSpeedEventsCsv(), Encoding.UTF8);
-            File.WriteAllText(speedSummaryPath, BuildQuestionnaireSpeedSummaryCsv(), Encoding.UTF8);
+            WriteCheckpointFile(rawTracePath, BuildQuestionnaireRawTraceCsv());
+            WriteCheckpointFile(interactionPath, BuildQuestionnaireInteractionEventsCsv());
+            WriteCheckpointFile(metadataPath, BuildQuestionnaireMetadataCsv());
+            WriteCheckpointFile(physicalSpeedPath, BuildQuestionnairePhysicalSpeedSamplesCsv());
+            WriteCheckpointFile(slotSpeedPath, BuildQuestionnaireSlotSpeedEventsCsv());
+            WriteCheckpointFile(speedSummaryPath, BuildQuestionnaireSpeedSummaryCsv());
             savedPaths.Add(rawTracePath);
             savedPaths.Add(interactionPath);
             savedPaths.Add(metadataPath);
@@ -3829,14 +3985,244 @@ public class XRWorkloadProbeSceneController : MonoBehaviour
             _mainSceneMergedExporter.ExportNow(reason);
         }
 
+        if (!questionnaireOnlyMode)
+        {
+            string integrityPath = Path.Combine(
+                folder,
+                $"WorkloadProbe_DataIntegrity_{participantId}_{stamp}_{reason}.csv");
+            WriteCheckpointFile(integrityPath, BuildWorkloadProbeDataIntegrityCsv(reason, folder, stamp));
+            _lastDataIntegrityPath = integrityPath;
+            savedPaths.Add(integrityPath);
+            if (!_lastDataIntegrityPassed)
+                Debug.LogError(
+                    $"[XRWorkloadProbe] DATA INTEGRITY CHECK FAILED. Do not use this run. Review: {integrityPath}",
+                    this);
+        }
+
+        if (string.Equals(reason, "completed", StringComparison.OrdinalIgnoreCase))
+            DeleteQuestionnaireLiveCheckpoints(folder);
+
         Debug.Log($"[XRWorkloadProbe] Saved logs:\n{string.Join("\n", savedPaths)}", this);
         if (string.Equals(reason, "completed", StringComparison.OrdinalIgnoreCase))
             _completedExportWritten = true;
     }
 
+    string BuildWorkloadProbeDataIntegrityCsv(string reason, string folder, string stamp)
+    {
+        int expectedBlockCount = _runBlockCount > 0 ? _runBlockCount : blockProfiles.Count;
+        int expectedTrialCount = 0;
+        for (int i = 0; i < blockProfiles.Count; i++)
+            expectedTrialCount += Mathf.Max(1, blockProfiles[i].trialsPerBlock);
+
+        var observedBlockIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        for (int i = 0; i < _trialRecords.Count; i++)
+        {
+            if (!string.IsNullOrWhiteSpace(_trialRecords[i].blockId))
+                observedBlockIds.Add(_trialRecords[i].blockId);
+        }
+
+        int questionnaireItemsPerBlock = ExpectedQuestionnaireItemCount();
+        int expectedQuestionnaireRows = collectQuestionnaireBetweenBlocks
+            ? expectedBlockCount * questionnaireItemsPerBlock
+            : 0;
+        int stageEventsPerItem = 3 + (collectConfidenceAfterEachItem ? 3 : 0) +
+                                 (requireReadAcknowledgement ? 2 : 0);
+        int expectedStageEventRows = expectedQuestionnaireRows * stageEventsPerItem;
+        int minimumRawTraceRows = expectedQuestionnaireRows *
+                                  (collectConfidenceAfterEachItem ? 4 : 2);
+        int minimumInteractionRows = expectedQuestionnaireRows *
+                                     (collectConfidenceAfterEachItem ? 8 : 4);
+        int observedMergedRows = _mainSceneAnswerExportMirror?.summaries.Count ?? 0;
+        int behaviorMetricFiles = _probeBehaviorCollector?.MetricFileCountWritten ?? 0;
+        int behaviorRawFiles = _probeBehaviorCollector?.RawFileCountWritten ?? 0;
+        string outputSuffix = $"{participantId}_{stamp}_{reason}";
+        var expectedPrimaryPaths = new List<string>
+        {
+            Path.Combine(folder, $"WorkloadProbe_Trials_{outputSuffix}.csv"),
+            Path.Combine(folder, $"WorkloadProbe_Blocks_{outputSuffix}.csv"),
+            Path.Combine(folder, $"CAREXR_Questionnaire_{outputSuffix}.csv"),
+            Path.Combine(folder, $"CAREXR_Questionnaire_StageEvents_{outputSuffix}.csv")
+        };
+        if (_questionnaireRecords.Count > 0)
+        {
+            expectedPrimaryPaths.Add(Path.Combine(folder, $"CAREXR_Questionnaire_RawTrace_{outputSuffix}.csv"));
+            expectedPrimaryPaths.Add(Path.Combine(folder, $"CAREXR_Questionnaire_InteractionEvents_{outputSuffix}.csv"));
+            expectedPrimaryPaths.Add(Path.Combine(folder, $"CAREXR_Questionnaire_Metadata_{outputSuffix}.csv"));
+            expectedPrimaryPaths.Add(Path.Combine(folder, $"CAREXR_Questionnaire_PhysicalSpeedSamples_{outputSuffix}.csv"));
+            expectedPrimaryPaths.Add(Path.Combine(folder, $"CAREXR_Questionnaire_SlotSpeedEvents_{outputSuffix}.csv"));
+            expectedPrimaryPaths.Add(Path.Combine(folder, $"CAREXR_Questionnaire_SpeedSummary_{outputSuffix}.csv"));
+        }
+        int observedPrimaryFiles = 0;
+        for (int i = 0; i < expectedPrimaryPaths.Count; i++)
+            if (File.Exists(expectedPrimaryPaths[i])) observedPrimaryFiles++;
+        int mergedFileCount = Directory.Exists(folder)
+            ? Directory.GetFiles(folder, $"KnobBehavior_Merged_{participantId}_*.csv", SearchOption.AllDirectories).Length
+            : 0;
+
+        var rows = new List<string>();
+        bool allRequiredChecksPass = true;
+
+        void AddCheck(
+            string checkId,
+            string expected,
+            string observed,
+            bool pass,
+            bool required,
+            string note)
+        {
+            string status = pass ? "PASS" : required ? "FAIL" : "WARN";
+            if (required && !pass)
+                allRequiredChecksPass = false;
+            rows.Add(string.Join(",", new[]
+            {
+                Csv(participantId), I(sessionNumber), Csv(EffectiveConditionLabel()), Csv(reason),
+                Csv(checkId), B(required), Csv(expected), Csv(observed), Csv(status), Csv(note)
+            }));
+        }
+
+        bool completed = string.Equals(reason, "completed", StringComparison.OrdinalIgnoreCase);
+        AddCheck("run_completion", "completed", reason, completed, true,
+            "A formal-study run should end through the normal completion path.");
+        AddCheck("primary_csv_files", I(expectedPrimaryPaths.Count), I(observedPrimaryFiles),
+            observedPrimaryFiles == expectedPrimaryPaths.Count, true,
+            "Trial, block, questionnaire, event, trace, metadata, and speed files must all exist on disk.");
+        AddCheck("behavior_collector_present", "1", _probeBehaviorCollector != null ? "1" : "0",
+            _probeBehaviorCollector != null, true,
+            "The scene-level collector supplies the 29 metrics and 30 Hz task traces.");
+        AddCheck("behavior_metric_files", I(expectedBlockCount), I(behaviorMetricFiles),
+            behaviorMetricFiles == expectedBlockCount, true,
+            "One 29-row Metrics.csv is required for every task block.");
+        AddCheck("behavior_raw_files", I(expectedBlockCount), I(behaviorRawFiles),
+            behaviorRawFiles == expectedBlockCount, true,
+            "One 30 Hz RawSamples.csv is required for every task block.");
+        AddCheck("block_rows", I(expectedBlockCount), I(observedBlockIds.Count),
+            observedBlockIds.Count == expectedBlockCount, true,
+            "Distinct block IDs observed in the trial records.");
+        AddCheck("trial_rows", I(expectedTrialCount), I(_trialRecords.Count),
+            _trialRecords.Count == expectedTrialCount, true,
+            "Expected count is the sum of trialsPerBlock in the configured profiles.");
+        AddCheck("questionnaire_rows", I(expectedQuestionnaireRows), I(_questionnaireRecords.Count),
+            _questionnaireRecords.Count == expectedQuestionnaireRows, collectQuestionnaireBetweenBlocks,
+            "Each completed block should contain every configured questionnaire item.");
+        AddCheck("questionnaire_stage_event_rows", I(expectedStageEventRows), I(_questionnaireStageEvents.Count),
+            _questionnaireStageEvents.Count == expectedStageEventRows, collectQuestionnaireBetweenBlocks,
+            "Expected events include Enter, Confirm, and Exit for Answer and Confidence, plus Read when enabled.");
+        AddCheck("questionnaire_raw_trace_rows", $">={minimumRawTraceRows}", I(_questionnaireRawTraceRecords.Count),
+            _questionnaireRawTraceRecords.Count >= minimumRawTraceRows, collectQuestionnaireBetweenBlocks,
+            "Minimum requires stage-enter and stage-exit anchors for every recorded knob stage.");
+        AddCheck("questionnaire_interaction_event_rows", $">={minimumInteractionRows}", I(_questionnaireInteractionEvents.Count),
+            _questionnaireInteractionEvents.Count >= minimumInteractionRows, collectQuestionnaireBetweenBlocks,
+            "Interaction events preserve first interaction, grabs, confirmation, and stage transitions.");
+
+        bool speedRequired = collectQuestionnaireBetweenBlocks &&
+                             recordQuestionnairePersonalSpeed &&
+                             IsQuestionnaireKnobInputActive;
+        AddCheck("physical_speed_samples", ">0", I(_questionnairePhysicalSpeedSamples.Count),
+            _questionnairePhysicalSpeedSamples.Count > 0, speedRequired,
+            "Controller wrist-twist samples used for participant-specific speed calibration.");
+        AddCheck("slot_speed_events", ">0", I(_questionnaireSlotSpeedEvents.Count),
+            _questionnaireSlotSpeedEvents.Count > 0, speedRequired,
+            "Event-level slot transitions used for detent and slots-per-second summaries.");
+        AddCheck("main_scene_compatible_rows", I(expectedQuestionnaireRows), I(observedMergedRows),
+            observedMergedRows == expectedQuestionnaireRows, collectQuestionnaireBetweenBlocks,
+            "Compatibility rows support the existing KnobBehavior_Merged analysis pipeline.");
+        AddCheck("main_scene_compatible_file", ">=1", I(mergedFileCount),
+            mergedFileCount > 0, collectQuestionnaireBetweenBlocks,
+            "The merged compatibility CSV must exist beneath the workload-probe output folder.");
+
+        if (requireReadAcknowledgement)
+        {
+            int readRows = 0;
+            for (int i = 0; i < _questionnaireRecords.Count; i++)
+                if (_questionnaireRecords[i].readRt >= 0f) readRows++;
+            AddCheck("read_stage_rows", I(expectedQuestionnaireRows), I(readRows),
+                readRows == expectedQuestionnaireRows, true,
+                "Read-stage RT is required by the current scene configuration.");
+        }
+        else
+        {
+            AddCheck("read_stage_rows", "not configured", "0", true, false,
+                "This Probe protocol currently records Answer and Confidence, not a separate Read acknowledgement.");
+        }
+
+        var sb = new StringBuilder();
+        sb.AppendLine(
+            "participantId,sessionNumber,conditionLabel,reason,checkId,required,expected,observed,status,note");
+        sb.AppendLine(string.Join(",", new[]
+        {
+            Csv(participantId), I(sessionNumber), Csv(EffectiveConditionLabel()), Csv(reason),
+            Csv("overall"), "1", Csv("all required checks PASS"),
+            Csv(allRequiredChecksPass ? "all required checks PASS" : "one or more required checks FAIL"),
+            Csv(allRequiredChecksPass ? "PASS" : "FAIL"),
+            Csv("Do not treat a run as analysis-ready when this row is FAIL.")
+        }));
+        for (int i = 0; i < rows.Count; i++)
+            sb.AppendLine(rows[i]);
+        _lastDataIntegrityPassed = allRequiredChecksPass;
+        return sb.ToString();
+    }
+
+    int ExpectedQuestionnaireItemCount()
+    {
+        TextAsset bankAsset = Resources.Load<TextAsset>(questionnaireBankResourcesPath);
+        if (bankAsset != null)
+        {
+            try
+            {
+                LikertSurveyConfig bank = JsonUtility.FromJson<LikertSurveyConfig>(bankAsset.text);
+                if (bank?.items != null)
+                {
+                    int validCount = 0;
+                    for (int i = 0; i < bank.items.Count; i++)
+                        if (bank.items[i] != null && !string.IsNullOrWhiteSpace(bank.items[i].stem))
+                            validCount++;
+                    if (validCount > 0)
+                        return validCount;
+                }
+            }
+            catch (Exception exception)
+            {
+                Debug.LogWarning(
+                    $"[XRWorkloadProbe] Could not count questionnaire items for integrity validation: {exception.Message}",
+                    this);
+            }
+        }
+        return 6;
+    }
+
+    void DeleteQuestionnaireLiveCheckpoints(string folder)
+    {
+        string suffix = $"{participantId}_LIVE.csv";
+        string[] filePrefixes =
+        {
+            "CAREXR_Questionnaire_",
+            "CAREXR_Questionnaire_StageEvents_",
+            "CAREXR_Questionnaire_RawTrace_",
+            "CAREXR_Questionnaire_InteractionEvents_",
+            "CAREXR_Questionnaire_Metadata_",
+            "CAREXR_Questionnaire_PhysicalSpeedSamples_",
+            "CAREXR_Questionnaire_SlotSpeedEvents_",
+            "CAREXR_Questionnaire_SpeedSummary_"
+        };
+
+        for (int i = 0; i < filePrefixes.Length; i++)
+        {
+            string path = Path.Combine(folder, filePrefixes[i] + suffix);
+            try
+            {
+                if (File.Exists(path))
+                    File.Delete(path);
+            }
+            catch (Exception exception)
+            {
+                Debug.LogWarning($"[XRWorkloadProbe] Could not remove completed LIVE checkpoint {path}: {exception.Message}", this);
+            }
+        }
+    }
+
     void WriteQuestionnaireLiveCheckpoint()
     {
-        if (!questionnaireOnlyMode)
+        if (_questionnaireRecords.Count == 0)
             return;
 
         try
@@ -3897,10 +4283,7 @@ public class XRWorkloadProbeSceneController : MonoBehaviour
 
     string GetOutputFolder()
     {
-        if (ExperimentRunContext.IsConfigured)
-            return ExperimentRunContext.ResolveOutputDirectory(outputFolderName);
-
-        return Path.Combine(Application.persistentDataPath, outputFolderName);
+        return ExperimentRunContext.ResolveOutputDirectory(outputFolderName);
     }
 
     string BuildTrialCsv()
@@ -4132,7 +4515,7 @@ public class XRWorkloadProbeSceneController : MonoBehaviour
             QuestionnaireRecord record = _questionnaireRecords[i];
             AppendQuestionnaireSpeedSummaryRow(
                 sb, "item_stage", record, "Answer", Mathf.Max(2, record.scale));
-            if (collectConfidenceAfterEachItem)
+            if (record.confidenceEnterRealtime >= 0f && record.confidenceExitRealtime >= 0f)
             {
                 AppendQuestionnaireSpeedSummaryRow(
                     sb, "item_stage", record, "Confidence", Mathf.Max(2, questionnaireConfidenceScale));
@@ -4141,7 +4524,8 @@ public class XRWorkloadProbeSceneController : MonoBehaviour
 
         AppendQuestionnaireSpeedSummaryRow(
             sb, "participant_stage", null, "Answer", Mathf.Max(2, questionnaireScale));
-        if (collectConfidenceAfterEachItem)
+        if (_questionnaireRecords.Exists(record =>
+                record != null && record.confidenceEnterRealtime >= 0f && record.confidenceExitRealtime >= 0f))
         {
             AppendQuestionnaireSpeedSummaryRow(
                 sb, "participant_stage", null, "Confidence", Mathf.Max(2, questionnaireConfidenceScale));
@@ -4264,10 +4648,11 @@ public class XRWorkloadProbeSceneController : MonoBehaviour
         var sb = new StringBuilder();
         sb.AppendLine("participantId,sessionNumber,conditionLabel,questionnaireSessionId,schemaVersion,featureAlgorithmVersion,questionBankResourcesPath,responseScale,confidenceScale,collectConfidence,requireReadAcknowledgement,readExitControl,confirmHoldSeconds,knobDiameterMeters,knobArcDegrees,pauseThresholdSec,stillThresholdSec,fastFlickThresholdSps,traceSampleIntervalSec,speedDeltaMin,speedDeltaK,speedBandMinimumEpisodes,microMinimumTransitions,microMaximumSlotSpan,personalSpeedRecordingEnabled,speedSchemaVersion,physicalSpeedSampleIntervalSec,physicalSpeedMinimumDeltaDegrees,physicalSpeedMinimumDps,physicalSpeedMaximumSampleGapSec,slotSpeedMaximumTransitionGapSec,calibrationMinimumSlotEvents,calibrationMinimumPhysicalSamples,physicalAngleSource,slotSpeedDefinition,speedConfirmationSamplesExcluded,unityVersion,platform,deviceModel,operatingSystem,xrLoadedDevice,generatedUtc");
         sb.AppendLine(string.Join(",",
-            Csv(participantId), I(sessionNumber), Csv(EffectiveConditionLabel()), Csv(questionnaireOnlySessionId),
+            Csv(participantId), I(sessionNumber), Csv(EffectiveConditionLabel()),
+            Csv(questionnaireOnlyMode ? questionnaireOnlySessionId : "workload_probe_inter_block"),
             Csv(QuestionnaireSchemaVersion), Csv(EffectiveFeatureAlgorithmVersion()), Csv(questionnaireBankResourcesPath),
             I(questionnaireScale), I(questionnaireConfidenceScale), B(collectConfidenceAfterEachItem),
-            B(requireReadAcknowledgement), Csv("right_primary_button_a"), F(questionnaireConfirmHoldSeconds),
+            B(requireReadAcknowledgement), Csv(requireReadAcknowledgement ? "right_primary_button_a" : "not_collected"), F(questionnaireConfirmHoldSeconds),
             F(questionnaireKnobDiameterMeters), F(questionnaireKnobArcDegrees), F(questionnairePauseThresholdSec),
             F(questionnaireStillThresholdSec), F(questionnaireFastFlickThresholdSps),
             F(questionnaireTraceSampleIntervalSec), F(questionnaireSpeedDeltaMin), F(questionnaireSpeedDeltaK),

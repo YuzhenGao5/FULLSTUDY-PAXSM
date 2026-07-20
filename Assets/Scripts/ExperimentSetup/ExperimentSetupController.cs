@@ -3,6 +3,7 @@ using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.EventSystems;
+using UnityEngine.Rendering.Universal;
 using UnityEngine.SceneManagement;
 using UnityEngine.UI;
 #if ENABLE_INPUT_SYSTEM
@@ -11,6 +12,8 @@ using UnityEngine.InputSystem.UI;
 
 public sealed class ExperimentSetupController : MonoBehaviour
 {
+    const int ResearcherUiLayer = 5;
+
     [SerializeField] ExperimentSceneCatalog sceneCatalog;
 
     public void SetSceneCatalog(ExperimentSceneCatalog catalog)
@@ -38,6 +41,8 @@ public sealed class ExperimentSetupController : MonoBehaviour
     Text _previewText;
     Text _statusText;
     Button _startButton;
+    Camera _headsetCamera;
+    Camera _researcherUiCamera;
     bool _isLoading;
     bool _initialized;
 
@@ -64,6 +69,7 @@ public sealed class ExperimentSetupController : MonoBehaviour
 
         ResolveCatalog();
         EnsureCamera();
+        EnsureResearcherUiCamera();
         EnsureEventSystem();
         BuildInterface();
         RestoreLastSetup();
@@ -88,6 +94,8 @@ public sealed class ExperimentSetupController : MonoBehaviour
             "workload", "Workload probe", "XRWorkloadProbeScene", "XRWorkloadProbe_Data"));
         _availableScenes.Add(new ExperimentSceneCatalog.SceneEntry(
             "questionnaire-read", "Questionnaire with Read stage", "XRQuestionnaireReadScene", "XRQuestionnaireRead_Data"));
+        _availableScenes.Add(new ExperimentSceneCatalog.SceneEntry(
+            "paxsm-comparison", "PAXSM comparison study", "PAXSMComparisonScene", "PAXSMComparison_Data"));
     }
 
     void EnsureCamera()
@@ -98,11 +106,47 @@ public sealed class ExperimentSetupController : MonoBehaviour
             var cameraObject = new GameObject("Setup Camera", typeof(Camera), typeof(AudioListener));
             camera = cameraObject.GetComponent<Camera>();
             cameraObject.tag = "MainCamera";
+            cameraObject.transform.position = Vector3.up * 1.65f;
         }
 
         camera.clearFlags = CameraClearFlags.SolidColor;
-        camera.backgroundColor = _pageColor;
-        camera.orthographic = true;
+        camera.backgroundColor = new Color(0.24f, 0.58f, 0.82f, 1f);
+        camera.orthographic = false;
+        camera.fieldOfView = 65f;
+        camera.nearClipPlane = 0.03f;
+        camera.farClipPlane = 100f;
+        camera.cullingMask &= ~(1 << ResearcherUiLayer);
+        _headsetCamera = camera;
+        ExperimentSetupHeadsetWaitingView.Ensure(camera);
+    }
+
+    void EnsureResearcherUiCamera()
+    {
+        GameObject cameraObject = GameObject.Find("Researcher UI Camera");
+        if (cameraObject == null)
+            cameraObject = new GameObject("Researcher UI Camera", typeof(Camera));
+
+        cameraObject.tag = "Untagged";
+        cameraObject.layer = ResearcherUiLayer;
+        cameraObject.transform.SetPositionAndRotation(new Vector3(0f, 0f, -10f), Quaternion.identity);
+
+        _researcherUiCamera = cameraObject.GetComponent<Camera>();
+        _researcherUiCamera.clearFlags = CameraClearFlags.Depth;
+        _researcherUiCamera.cullingMask = 1 << ResearcherUiLayer;
+        _researcherUiCamera.depth = 100f;
+        _researcherUiCamera.orthographic = true;
+        _researcherUiCamera.orthographicSize = 5f;
+        _researcherUiCamera.nearClipPlane = 0.1f;
+        _researcherUiCamera.farClipPlane = 20f;
+        _researcherUiCamera.stereoTargetEye = StereoTargetEyeMask.None;
+        _researcherUiCamera.targetDisplay = 0;
+
+        UniversalAdditionalCameraData cameraData =
+            cameraObject.GetComponent<UniversalAdditionalCameraData>();
+        if (cameraData == null)
+            cameraData = cameraObject.AddComponent<UniversalAdditionalCameraData>();
+        cameraData.allowXRRendering = false;
+        cameraData.renderPostProcessing = false;
     }
 
     void EnsureEventSystem()
@@ -128,7 +172,10 @@ public sealed class ExperimentSetupController : MonoBehaviour
             typeof(CanvasScaler),
             typeof(GraphicRaycaster));
         Canvas canvas = canvasObject.GetComponent<Canvas>();
-        canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+        canvas.renderMode = RenderMode.ScreenSpaceCamera;
+        canvas.worldCamera = _researcherUiCamera;
+        canvas.planeDistance = 1f;
+        canvas.targetDisplay = 0;
         canvas.sortingOrder = 100;
 
         CanvasScaler scaler = canvasObject.GetComponent<CanvasScaler>();
@@ -237,6 +284,19 @@ public sealed class ExperimentSetupController : MonoBehaviour
         _sceneDropdown.onValueChanged.AddListener(_ => RefreshState());
         _participantInput.onValueChanged.AddListener(_ => RefreshState());
         _outputInput.onValueChanged.AddListener(_ => RefreshState());
+
+        SetLayerRecursively(canvasObject, ResearcherUiLayer);
+    }
+
+    static void SetLayerRecursively(GameObject root, int layer)
+    {
+        if (root == null)
+            return;
+
+        root.layer = layer;
+        Transform rootTransform = root.transform;
+        for (int i = 0; i < rootTransform.childCount; i++)
+            SetLayerRecursively(rootTransform.GetChild(i).gameObject, layer);
     }
 
     void RestoreLastSetup()
@@ -247,8 +307,7 @@ public sealed class ExperimentSetupController : MonoBehaviour
         if (!ExperimentRunContext.TryLoadLastSetup(out ExperimentRunContext.LastSetup setup))
             return;
 
-        if (!string.IsNullOrWhiteSpace(setup.outputRoot))
-            _outputInput.text = setup.outputRoot;
+        _outputInput.text = ExperimentRunContext.MigrateSavedOutputRoot(setup.outputRoot);
 
         for (int i = 0; i < _availableScenes.Count; i++)
         {

@@ -65,6 +65,10 @@ public sealed class XRWorkloadProbeBehaviorCollector : MonoBehaviour
 
     public bool IsCollectingExperiment => _activeBlock != null;
     public string ActiveBlockId => _activeBlock != null ? _activeBlock.blockId : "";
+    public int FinalizedBlockCount => _finalizedPresentationOrders.Count;
+    public int MetricFileCountWritten { get; private set; }
+    public int RawFileCountWritten { get; private set; }
+    public bool RawSamplesExpected => writeRawSamples;
 
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
     static void InstallOnlyInXRWorkloadProbeScene()
@@ -169,6 +173,17 @@ public sealed class XRWorkloadProbeBehaviorCollector : MonoBehaviour
     {
         if (!_isShuttingDown && _activeBlock != null)
             EndBlock(ReadTrialRecords(), "collector_disabled_partial");
+    }
+
+    public void FlushForExport(string reason)
+    {
+        if (_activeBlock == null)
+            return;
+
+        string completionReason = string.Equals(reason, "completed", StringComparison.OrdinalIgnoreCase)
+            ? "completed_export_flush"
+            : $"{reason}_export_flush";
+        EndBlock(ReadTrialRecords(), completionReason);
     }
 
     bool CacheSceneControllerState()
@@ -309,6 +324,9 @@ public sealed class XRWorkloadProbeBehaviorCollector : MonoBehaviour
             }
 
             _finalizedPresentationOrders.Add(completed.presentationOrder);
+            MetricFileCountWritten++;
+            if (!string.IsNullOrEmpty(rawPath))
+                RawFileCountWritten++;
             Debug.Log(
                 $"[XRWorkloadProbe Behavior] Saved behavior set {completed.presentationOrder} " +
                 $"({completed.blockId}, {metrics.Count} dimension-tagged metrics, " +
@@ -386,6 +404,11 @@ public sealed class XRWorkloadProbeBehaviorCollector : MonoBehaviour
         out Vector3 origin,
         out Vector3 direction)
     {
+#if UNITY_EDITOR
+        if (CAREXRSyntheticParticipantRuntime.Active &&
+            CAREXRSyntheticParticipantRuntime.TryGetRay(out origin, out direction))
+            return true;
+#endif
         // A static scene transform is not evidence of a tracked controller.
         if (!sample.rightHandValid)
         {
@@ -486,6 +509,11 @@ public sealed class XRWorkloadProbeBehaviorCollector : MonoBehaviour
         out Vector3 position,
         out Quaternion rotation)
     {
+#if UNITY_EDITOR
+        if (CAREXRSyntheticParticipantRuntime.Active &&
+            CAREXRSyntheticParticipantRuntime.TryGetPose(node, out position, out rotation))
+            return true;
+#endif
         position = default;
         rotation = default;
         devices.Clear();
@@ -642,9 +670,7 @@ public sealed class XRWorkloadProbeBehaviorCollector : MonoBehaviour
 
     string GetOutputFolder()
     {
-        return ExperimentRunContext.IsConfigured
-            ? ExperimentRunContext.ResolveOutputDirectory(probeController.outputFolderName)
-            : Path.Combine(Application.persistentDataPath, probeController.outputFolderName);
+        return ExperimentRunContext.ResolveOutputDirectory(probeController.outputFolderName);
     }
 
     string BuildMetricCsv(

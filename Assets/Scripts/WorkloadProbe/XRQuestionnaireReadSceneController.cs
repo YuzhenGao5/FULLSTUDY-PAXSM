@@ -1,7 +1,7 @@
 using System.Collections;
 using UnityEngine;
 
-public sealed class XRQuestionnaireReadSceneController : XRWorkloadProbeSceneController
+public class XRQuestionnaireReadSceneController : XRWorkloadProbeSceneController
 {
     [Header("Read Scene Head-relative Layout")]
     [Range(0f, 1.5f)] public float headPoseSettleSeconds = 0.35f;
@@ -25,7 +25,7 @@ public sealed class XRQuestionnaireReadSceneController : XRWorkloadProbeSceneCon
     [Range(1.5f, 4.5f)] public float tutorialControllerScale = 2.8f;
     [Range(2.5f, 7f)] public float tutorialCycleSeconds = 4.6f;
 
-    Transform _questionnaireRoot;
+    Transform _readSceneQuestionnaireRoot;
 
     GameObject _grabGuideRoot;
     LineRenderer _leftGrabArrow;
@@ -105,17 +105,24 @@ public sealed class XRQuestionnaireReadSceneController : XRWorkloadProbeSceneCon
 
     void ResolveQuestionnaireRoot()
     {
-        if (_questionnaireRoot != null)
+        if (_readSceneQuestionnaireRoot != null)
             return;
 
         GameObject root = GameObject.Find("PAXSM_InterBlockQuestionnaire");
         if (root != null)
-            _questionnaireRoot = root.transform;
+            _readSceneQuestionnaireRoot = root.transform;
     }
 
     void UpdateFirstGrabGuidance()
     {
-        if (_questionnaireRoot == null || !_questionnaireRoot.gameObject.activeInHierarchy)
+        if (_readSceneQuestionnaireRoot == null || !_readSceneQuestionnaireRoot.gameObject.activeInHierarchy)
+        {
+            SetGrabGuideVisible(false);
+            SetControllerTutorialVisible(false);
+            return;
+        }
+
+        if (!IsQuestionnaireKnobInputActive)
         {
             SetGrabGuideVisible(false);
             SetControllerTutorialVisible(false);
@@ -131,8 +138,8 @@ public sealed class XRQuestionnaireReadSceneController : XRWorkloadProbeSceneCon
             return;
         }
 
-        KnobGrabByWrist grab = _questionnaireRoot.GetComponentInChildren<KnobGrabByWrist>(true);
-        Transform panel = _questionnaireRoot.Find("PAXSM_KnobBackingPanel");
+        KnobGrabByWrist grab = _readSceneQuestionnaireRoot.GetComponentInChildren<KnobGrabByWrist>(true);
+        Transform panel = _readSceneQuestionnaireRoot.Find("PAXSM_KnobBackingPanel");
         if (grab == null || panel == null)
         {
             SetGrabGuideVisible(false);
@@ -178,7 +185,7 @@ public sealed class XRQuestionnaireReadSceneController : XRWorkloadProbeSceneCon
             return;
 
         _grabGuideRoot = new GameObject("PAXSM_ReadSceneGrabGuide");
-        _grabGuideRoot.transform.SetParent(_questionnaireRoot, true);
+        _grabGuideRoot.transform.SetParent(_readSceneQuestionnaireRoot, true);
 
         Shader shader = Shader.Find("Universal Render Pipeline/Unlit");
         if (shader == null)
@@ -300,7 +307,7 @@ public sealed class XRQuestionnaireReadSceneController : XRWorkloadProbeSceneCon
         }
 
         _controllerTutorialRoot = new GameObject("PAXSM_ControllerGrabTutorial");
-        _controllerTutorialRoot.transform.SetParent(_questionnaireRoot, true);
+        _controllerTutorialRoot.transform.SetParent(_readSceneQuestionnaireRoot, true);
 
         GameObject pivotObject = new GameObject("AnimatedControllerPivot");
         pivotObject.transform.SetParent(_controllerTutorialRoot.transform, true);

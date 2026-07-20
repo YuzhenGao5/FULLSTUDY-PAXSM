@@ -28,3 +28,8 @@ MonoBehaviour:
     sceneName: XRQuestionnaireReadScene
     dataNamespace: XRQuestionnaireRead_Data
     enabled: 1
+  - id: paxsm-comparison
+    displayName: PAXSM comparison study
+    sceneName: PAXSMComparisonScene
+    dataNamespace: PAXSMComparison_Data
+    enabled: 1

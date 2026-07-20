@@ -17,6 +17,9 @@ EditorBuildSettings:
   - enabled: 1
     path: Assets/Scenes/XRQuestionnaireReadScene.unity
     guid: 85f1c420cbb54b21a9de75cbca721a6e
+  - enabled: 1
+    path: Assets/Scenes/PAXSMComparisonScene.unity
+    guid: 4e1d7a85c0b84cc3a3b2d8f6e9a4c127
   - enabled: 0
     path: Assets/Core prefrag/prefrab generagte XRtoolkit.unity
     guid: f7373734d85b09641befaf2d4c6a8ae2

@@ -17986,8 +17986,8 @@ MonoBehaviour:
   warnIfSummaryMarkNotMatch: 1
   markPrefix: Q
   outputMode: 2
-  customAbsoluteFolder: C:\DataPilot
-  outputSubfolder: CSV_Exports
+  customAbsoluteFolder:
+  outputSubfolder: MainScene_Data
   fileNamePrefix: XRQ
   logExportPath: 1
   autoExportOnQuit: 1

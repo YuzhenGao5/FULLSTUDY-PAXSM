@@ -136,7 +136,7 @@ internal sealed class AgentEngine
 			questionBankResourcesPath = "QuestionBanks/Scale",
 			responseMode = responseMode,
 			scale = num2,
-			outputFolder = "C:/PAXSM_FullStudy_Data",
+			outputFolder = StudyPaths.DefaultOutputFolder,
 			outputSubfolder = "ExportsCSV",
 			fileNamePrefix = "PAXSM",
 			exportMergedCsv = true,
@@ -205,7 +205,7 @@ internal sealed class AgentEngine
 				new
 				{
 					role = "system",
-					content = BuildSystemPrompt()
+					content = ApplyRuntimePathDefaults(BuildSystemPrompt())
 				},
 				new
 				{
@@ -256,7 +256,7 @@ internal sealed class AgentEngine
 				new
 				{
 					role = "system",
-					content = BuildOllamaSystemPrompt()
+					content = ApplyRuntimePathDefaults(BuildOllamaSystemPrompt())
 				},
 				new
 				{
@@ -294,6 +294,14 @@ internal sealed class AgentEngine
 	private static string NormalizeOllamaBaseUrl(string? baseUrl)
 	{
 		return (string.IsNullOrWhiteSpace(baseUrl) ? "http://localhost:11434" : baseUrl.Trim()).TrimEnd('/');
+	}
+
+	private static string ApplyRuntimePathDefaults(string prompt)
+	{
+		return prompt.Replace(
+			"C:/PAXSM_FullStudy_Data",
+			StudyPaths.DefaultOutputFolder.Replace('\\', '/'),
+			StringComparison.Ordinal);
 	}
 
 	private static string BuildSystemPrompt()
@@ -740,7 +748,7 @@ internal sealed class AgentEngine
 			questionBankResourcesPath = "QuestionBanks/Scale",
 			responseMode = text,
 			scale = num,
-			outputFolder = "C:/PAXSM_FullStudy_Data",
+			outputFolder = StudyPaths.DefaultOutputFolder,
 			outputSubfolder = "ExportsCSV",
 			fileNamePrefix = "PAXSM",
 			exportMergedCsv = true,
@@ -777,7 +785,7 @@ internal sealed class AgentEngine
 			questionBankResourcesPath = "QuestionBanks/Scale",
 			responseMode = text,
 			scale = num,
-			outputFolder = "C:/PAXSM_FullStudy_Data",
+			outputFolder = StudyPaths.DefaultOutputFolder,
 			outputSubfolder = "ExportsCSV",
 			fileNamePrefix = "PAXSM",
 			exportMergedCsv = true,
@@ -1059,7 +1067,7 @@ internal sealed class AgentEngine
 			questionBankResourcesPath = "QuestionBanks/Scale",
 			responseMode = text,
 			scale = num,
-			outputFolder = "C:/PAXSM_FullStudy_Data",
+			outputFolder = StudyPaths.DefaultOutputFolder,
 			outputSubfolder = "ExportsCSV",
 			fileNamePrefix = "PAXSM",
 			exportMergedCsv = true,
@@ -3608,7 +3616,7 @@ internal sealed class AgentEngine
 		{
 			config.responseMode = "slider";
 		}
-		config.outputFolder = "C:/PAXSM_FullStudy_Data";
+		config.outputFolder = StudyPaths.DefaultOutputFolder;
 		config.outputSubfolder = "ExportsCSV";
 		config.fileNamePrefix = "PAXSM";
 		config.exportMergedCsv = true;

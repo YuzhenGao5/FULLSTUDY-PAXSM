@@ -119,7 +119,7 @@ public class QuestionResultsRecorder : MonoBehaviour
     public string SaveCsv(string directory = null)
     {
         if (string.IsNullOrEmpty(directory))
-            directory = Application.persistentDataPath;
+            directory = ExperimentRunContext.ResolveOutputDirectory("QuestionResults");
 
         Directory.CreateDirectory(directory);
         string file = Path.Combine(directory, $"{fileNamePrefix}_{sessionId}.csv");

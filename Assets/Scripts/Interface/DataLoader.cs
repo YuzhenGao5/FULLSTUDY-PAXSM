@@ -43,9 +43,11 @@ public class KnobBehaviorMergedCSVExporter : MonoBehaviour
     }
 
     [Header("Output Location")]
+    [HideInInspector]
     public OutputMode outputMode = OutputMode.ProjectAssets;
 
     [Tooltip("当 outputMode=CustomAbsolutePath 时生效，例如：D:\\XRExports")]
+    [HideInInspector]
     public string customAbsoluteFolder = "D:\\XRExports";
 
     [Tooltip("子目录名（会创建实验子文件夹）")]
@@ -63,6 +65,7 @@ public class KnobBehaviorMergedCSVExporter : MonoBehaviour
     public KeyCode manualExportKey = KeyCode.F9;
 
     private bool _exported = false;
+    public string LastExportDirectory { get; private set; } = "";
 
     void Update()
     {
@@ -158,6 +161,7 @@ public class KnobBehaviorMergedCSVExporter : MonoBehaviour
         string baseFolder = ResolveBaseFolder();
         string folder = Path.Combine(baseFolder, outputSubfolder, runFolderName);
         Directory.CreateDirectory(folder);
+        LastExportDirectory = folder;
 
         string path = Path.Combine(folder, $"KnobBehavior_Merged_P{participantNumber}_S{sessionNumber}_{timestampUTC}.csv");
         File.WriteAllText(path, BuildMergedCsv(timestampUTC), Encoding.UTF8);
@@ -175,23 +179,7 @@ public class KnobBehaviorMergedCSVExporter : MonoBehaviour
     {
         if (ExperimentRunContext.IsConfigured)
             return ExperimentRunContext.ResolveRunDirectory();
-
-        if (outputMode == OutputMode.ProjectAssets)
-        {
-#if UNITY_EDITOR
-            return Application.dataPath;
-#else
-            return Application.persistentDataPath;
-#endif
-        }
-
-        if (outputMode == OutputMode.PersistentDataPath)
-            return Application.persistentDataPath;
-
-        if (outputMode == OutputMode.CustomAbsolutePath)
-            return string.IsNullOrEmpty(customAbsoluteFolder) ? Application.persistentDataPath : customAbsoluteFolder;
-
-        return Application.persistentDataPath;
+        return ExperimentRunContext.GetStandaloneOutputRoot();
     }
 
     // =========================

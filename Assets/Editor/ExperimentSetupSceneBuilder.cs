@@ -6,6 +6,7 @@ using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
 using UnityEngine.SceneManagement;
+using UnityEngine.Rendering.Universal;
 using UnityEngine.UI;
 
 public static class ExperimentSetupSceneBuilder
@@ -16,6 +17,61 @@ public static class ExperimentSetupSceneBuilder
     const string MainScenePath = "Assets/Scenes/MainScene.unity";
     const string WorkloadScenePath = "Assets/Scenes/XRWorkloadProbeScene.unity";
     const string QuestionnaireScenePath = "Assets/Scenes/XRQuestionnaireReadScene.unity";
+    const string ComparisonScenePath = "Assets/Scenes/PAXSMComparisonScene.unity";
+    const string XrOriginPrefabPath = "Assets/Samples/XR Interaction Toolkit/3.2.1/Starter Assets/Prefabs/XR Origin (XR Rig).prefab";
+    const string LeftControllerPrefabPath = "Assets/Samples/XR Interaction Toolkit/3.2.1/Starter Assets/Prefabs/Controllers/XR Controller Left.prefab";
+    const string RightControllerPrefabPath = "Assets/Samples/XR Interaction Toolkit/3.2.1/Starter Assets/Prefabs/Controllers/XR Controller Right.prefab";
+    const string HeadsetCaptureSessionKey = "CAREXR.ExperimentSetup.CaptureHeadsetView";
+    const string HeadsetCaptureRequestFile = "CAREXR_ExperimentSetupHeadsetCapture.request";
+    const string RebuildRequestFile = "CAREXR_ExperimentSetupRebuild.request";
+    static double _nextHeadsetCaptureRequestCheck;
+
+    [InitializeOnLoadMethod]
+    static void RegisterHeadsetCaptureRunner()
+    {
+        EditorApplication.playModeStateChanged -= HandleHeadsetCapturePlayMode;
+        EditorApplication.playModeStateChanged += HandleHeadsetCapturePlayMode;
+        EditorApplication.update -= CheckForHeadsetCaptureRequest;
+        EditorApplication.update += CheckForHeadsetCaptureRequest;
+        EditorApplication.update -= CheckForRebuildRequest;
+        EditorApplication.update += CheckForRebuildRequest;
+    }
+
+    static void CheckForRebuildRequest()
+    {
+        if (EditorApplication.isCompiling || EditorApplication.isPlayingOrWillChangePlaymode)
+            return;
+
+        string requestPath = Path.Combine(
+            Directory.GetParent(Application.dataPath)?.FullName ?? ".",
+            "Temp",
+            RebuildRequestFile);
+        if (!File.Exists(requestPath))
+            return;
+
+        File.Delete(requestPath);
+        Build();
+    }
+
+    static void CheckForHeadsetCaptureRequest()
+    {
+        if (EditorApplication.timeSinceStartup < _nextHeadsetCaptureRequestCheck)
+            return;
+        _nextHeadsetCaptureRequestCheck = EditorApplication.timeSinceStartup + 0.5d;
+
+        if (EditorApplication.isCompiling || EditorApplication.isPlayingOrWillChangePlaymode)
+            return;
+
+        string requestPath = Path.Combine(
+            Directory.GetParent(Application.dataPath)?.FullName ?? ".",
+            "Temp",
+            HeadsetCaptureRequestFile);
+        if (!File.Exists(requestPath))
+            return;
+
+        File.Delete(requestPath);
+        CaptureHeadsetWaitingView();
+    }
 
     [MenuItem("CARE-XR/Rebuild Experiment Setup Scene")]
     public static void BuildFromMenu()
@@ -36,6 +92,7 @@ public static class ExperimentSetupSceneBuilder
         EnsureSceneExists(MainScenePath);
         EnsureSceneExists(WorkloadScenePath);
         EnsureSceneExists(QuestionnaireScenePath);
+        EnsureSceneExists(ComparisonScenePath);
         EnsureAssetFolder(CatalogFolder);
 
         ExperimentSceneCatalog catalog = AssetDatabase.LoadAssetAtPath<ExperimentSceneCatalog>(CatalogPath);
@@ -61,7 +118,12 @@ public static class ExperimentSetupSceneBuilder
                 "questionnaire-read",
                 "Questionnaire with Read stage",
                 "XRQuestionnaireReadScene",
-                "XRQuestionnaireRead_Data")
+                "XRQuestionnaireRead_Data"),
+            new ExperimentSceneCatalog.SceneEntry(
+                "paxsm-comparison",
+                "PAXSM comparison study",
+                "PAXSMComparisonScene",
+                "PAXSMComparison_Data")
         });
         EditorUtility.SetDirty(catalog);
         AssetDatabase.SaveAssets();
@@ -71,6 +133,30 @@ public static class ExperimentSetupSceneBuilder
         ExperimentSetupController controller = root.AddComponent<ExperimentSetupController>();
         controller.SetSceneCatalog(catalog);
         EditorUtility.SetDirty(controller);
+
+        GameObject xrOriginPrefab = AssetDatabase.LoadAssetAtPath<GameObject>(XrOriginPrefabPath);
+        if (xrOriginPrefab == null)
+            throw new FileNotFoundException("The configured XR Origin prefab is missing.", XrOriginPrefabPath);
+
+        GameObject xrOrigin = PrefabUtility.InstantiatePrefab(xrOriginPrefab, scene) as GameObject;
+        if (xrOrigin == null)
+            throw new InvalidOperationException("Could not instantiate the configured XR Origin prefab.");
+        xrOrigin.name = "XR Origin (XR Rig)";
+        DisableWaitingRigInteraction(xrOrigin);
+
+        Camera headsetCamera = xrOrigin.GetComponentInChildren<Camera>(true);
+        if (headsetCamera == null)
+            throw new InvalidOperationException("The configured XR Origin has no headset Camera.");
+        headsetCamera.gameObject.tag = "MainCamera";
+        if (headsetCamera.GetComponent<UniversalAdditionalCameraData>() == null)
+            headsetCamera.gameObject.AddComponent<UniversalAdditionalCameraData>();
+
+        ExperimentSetupHeadsetWaitingView waitingView =
+            headsetCamera.gameObject.AddComponent<ExperimentSetupHeadsetWaitingView>();
+        waitingView.SetControllerVisualPrefabs(
+            AssetDatabase.LoadAssetAtPath<GameObject>(LeftControllerPrefabPath),
+            AssetDatabase.LoadAssetAtPath<GameObject>(RightControllerPrefabPath));
+        EditorUtility.SetDirty(waitingView);
 
         EditorSceneManager.MarkSceneDirty(scene);
         if (!EditorSceneManager.SaveScene(scene, SetupScenePath))
@@ -82,12 +168,44 @@ public static class ExperimentSetupSceneBuilder
         Debug.Log("[ExperimentSetup] Scene, catalog, and Build Settings are ready.");
     }
 
+    static void DisableWaitingRigInteraction(GameObject xrOrigin)
+    {
+        MonoBehaviour[] behaviours = xrOrigin.GetComponentsInChildren<MonoBehaviour>(true);
+        for (int i = 0; i < behaviours.Length; i++)
+        {
+            MonoBehaviour behaviour = behaviours[i];
+            if (behaviour == null)
+                continue;
+
+            string typeName = behaviour.GetType().Name;
+            if (typeName.Contains("MoveProvider", StringComparison.Ordinal) ||
+                typeName.Contains("TurnProvider", StringComparison.Ordinal) ||
+                typeName.Contains("TeleportationProvider", StringComparison.Ordinal) ||
+                typeName.Contains("ClimbProvider", StringComparison.Ordinal) ||
+                string.Equals(typeName, "XRInputModalityManager", StringComparison.Ordinal))
+                behaviour.enabled = false;
+        }
+
+        Transform[] transforms = xrOrigin.GetComponentsInChildren<Transform>(true);
+        for (int i = 0; i < transforms.Length; i++)
+        {
+            Transform candidate = transforms[i];
+            if (candidate == null)
+                continue;
+            if (string.Equals(candidate.name, "Left Controller", StringComparison.Ordinal) ||
+                string.Equals(candidate.name, "Right Controller", StringComparison.Ordinal))
+                candidate.gameObject.SetActive(false);
+        }
+    }
+
     public static void ValidateFromCommandLine()
     {
         Scene scene = EditorSceneManager.OpenScene(SetupScenePath, OpenSceneMode.Single);
         ExperimentSetupController controller = UnityEngine.Object.FindFirstObjectByType<ExperimentSetupController>();
         if (controller == null)
             throw new InvalidOperationException("ExperimentSetup scene has no setup controller.");
+        if (GameObject.Find("XR Origin (XR Rig)") == null)
+            throw new InvalidOperationException("ExperimentSetup scene has no configured XR Origin.");
 
         controller.InitializeForEditorValidation();
 
@@ -99,17 +217,24 @@ public static class ExperimentSetupSceneBuilder
 
         if (canvas == null)
             throw new InvalidOperationException("Researcher setup Canvas was not created.");
-        if (dropdown == null || dropdown.options.Count != 3)
-            throw new InvalidOperationException("Experiment scene dropdown was not populated with three scenes.");
+        if (canvas.renderMode != RenderMode.ScreenSpaceCamera || canvas.worldCamera == null)
+            throw new InvalidOperationException("Researcher setup UI is not routed through its desktop-only Camera.");
+        UniversalAdditionalCameraData researcherCameraData =
+            canvas.worldCamera.GetComponent<UniversalAdditionalCameraData>();
+        if (canvas.worldCamera.stereoTargetEye != StereoTargetEyeMask.None ||
+            researcherCameraData == null || researcherCameraData.allowXRRendering)
+            throw new InvalidOperationException("Researcher setup UI Camera is still allowed to render in the headset.");
+        if (dropdown == null || dropdown.options.Count != 4)
+            throw new InvalidOperationException("Experiment scene dropdown was not populated with four scenes.");
         if (inputs.Length < 2)
             throw new InvalidOperationException("Participant and output input fields were not created.");
         if (startButton == null)
             throw new InvalidOperationException("Start Experiment button was not created.");
-        if (EditorBuildSettings.scenes.Length < 4 ||
+        if (EditorBuildSettings.scenes.Length < 5 ||
             !string.Equals(EditorBuildSettings.scenes[0].path, SetupScenePath, StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("ExperimentSetup is not the first Build Settings scene.");
 
-        Debug.Log("[ExperimentSetup] Runtime UI smoke test passed: 3 scenes, 2 inputs, start action, and build order.");
+        Debug.Log("[ExperimentSetup] Runtime UI smoke test passed: 4 scenes, 2 inputs, start action, and build order.");
         EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
     }
 
@@ -165,6 +290,160 @@ public static class ExperimentSetupSceneBuilder
         }
     }
 
+    [MenuItem("CARE-XR/Testing/Capture Experiment Setup Headset View _F8")]
+    public static void CaptureHeadsetWaitingView()
+    {
+        if (EditorApplication.isPlayingOrWillChangePlaymode)
+            return;
+
+        Scene activeScene = SceneManager.GetActiveScene();
+        if (!string.Equals(activeScene.path, SetupScenePath, StringComparison.OrdinalIgnoreCase))
+        {
+            Debug.LogError("[ExperimentSetup] Open ExperimentSetup.unity before capturing the headset waiting view.");
+            return;
+        }
+
+        SessionState.SetBool(HeadsetCaptureSessionKey, true);
+        EditorApplication.isPlaying = true;
+    }
+
+    static void HandleHeadsetCapturePlayMode(PlayModeStateChange state)
+    {
+        if (state != PlayModeStateChange.EnteredPlayMode ||
+            !SessionState.GetBool(HeadsetCaptureSessionKey, false))
+            return;
+
+        EditorApplication.delayCall += CaptureHeadsetWaitingViewInPlayMode;
+    }
+
+    static void CaptureHeadsetWaitingViewInPlayMode()
+    {
+        RenderTexture renderTexture = null;
+        Texture2D screenshot = null;
+
+        try
+        {
+            Camera camera = Camera.main;
+            if (camera == null)
+                throw new InvalidOperationException("The headset preview did not create a Camera.");
+            if (camera.GetComponent<ExperimentSetupHeadsetWaitingView>() == null)
+                throw new InvalidOperationException("The headset waiting-view component was not attached.");
+
+            Canvas researcherCanvas = UnityEngine.Object.FindObjectsByType<Canvas>(FindObjectsSortMode.None)
+                .FirstOrDefault(candidate => candidate.name == "Researcher Setup Canvas");
+            if (researcherCanvas == null || researcherCanvas.renderMode != RenderMode.ScreenSpaceCamera ||
+                researcherCanvas.worldCamera == null ||
+                researcherCanvas.worldCamera.stereoTargetEye != StereoTargetEyeMask.None)
+                throw new InvalidOperationException("The researcher interface is not isolated from headset rendering.");
+
+            MeshRenderer skyRenderer = UnityEngine.Object.FindObjectsByType<MeshRenderer>(FindObjectsSortMode.None)
+                .FirstOrDefault(candidate =>
+                    candidate.gameObject.name == "Participant Waiting Sky");
+            if (skyRenderer == null || skyRenderer.sharedMaterial == null)
+                throw new InvalidOperationException("The participant waiting sky was not created.");
+
+            GameObject platform = GameObject.Find("Participant Waiting Platform");
+            if (platform == null)
+                throw new InvalidOperationException("The participant waiting platform was not created.");
+
+            GameObject leftController = GameObject.Find("Tracked Left Controller");
+            GameObject rightController = GameObject.Find("Tracked Right Controller");
+            if (leftController == null || rightController == null)
+                throw new InvalidOperationException("The tracked controller visuals were not created.");
+            if (leftController.GetComponentsInChildren<MeshRenderer>(true).Length == 0 ||
+                rightController.GetComponentsInChildren<MeshRenderer>(true).Length == 0)
+                throw new InvalidOperationException("A tracked controller visual has no renderable model.");
+
+            const int width = 1280;
+            const int height = 720;
+            renderTexture = new RenderTexture(width, height, 24, RenderTextureFormat.ARGB32);
+            screenshot = new Texture2D(width, height, TextureFormat.RGB24, false);
+            RenderTexture previousActive = RenderTexture.active;
+            RenderTexture previousTarget = camera.targetTexture;
+            StereoTargetEyeMask previousStereoTarget = camera.stereoTargetEye;
+            Vector3 previousCameraPosition = camera.transform.position;
+            Quaternion previousCameraRotation = camera.transform.rotation;
+            Vector3 previousLeftPosition = leftController.transform.position;
+            Quaternion previousLeftRotation = leftController.transform.rotation;
+            Vector3 previousRightPosition = rightController.transform.position;
+            Quaternion previousRightRotation = rightController.transform.rotation;
+            bool previousLeftActive = leftController.activeSelf;
+            bool previousRightActive = rightController.activeSelf;
+
+            try
+            {
+                // Use a deterministic neutral pose for visual QA. Runtime tracking
+                // takes over again immediately after this one-frame capture.
+                camera.transform.SetPositionAndRotation(
+                    new Vector3(0f, 1.58f, -0.42f),
+                    Quaternion.Euler(10f, 0f, 0f));
+                leftController.SetActive(true);
+                rightController.SetActive(true);
+                leftController.transform.SetPositionAndRotation(
+                    new Vector3(-0.25f, 1.12f, 0.48f),
+                    Quaternion.Euler(35f, 15f, -10f));
+                rightController.transform.SetPositionAndRotation(
+                    new Vector3(0.25f, 1.12f, 0.48f),
+                    Quaternion.Euler(35f, -15f, 10f));
+                camera.stereoTargetEye = StereoTargetEyeMask.None;
+                camera.targetTexture = renderTexture;
+                camera.Render();
+                RenderTexture.active = renderTexture;
+                screenshot.ReadPixels(new Rect(0f, 0f, width, height), 0, 0);
+                screenshot.Apply(false, false);
+            }
+            finally
+            {
+                camera.targetTexture = previousTarget;
+                camera.stereoTargetEye = previousStereoTarget;
+                camera.transform.SetPositionAndRotation(previousCameraPosition, previousCameraRotation);
+                leftController.transform.SetPositionAndRotation(previousLeftPosition, previousLeftRotation);
+                rightController.transform.SetPositionAndRotation(previousRightPosition, previousRightRotation);
+                leftController.SetActive(previousLeftActive);
+                rightController.SetActive(previousRightActive);
+                RenderTexture.active = previousActive;
+            }
+
+            Color32[] pixels = screenshot.GetPixels32();
+            double luminanceSum = 0d;
+            double luminanceSquaredSum = 0d;
+            int sampleCount = 0;
+            for (int i = 0; i < pixels.Length; i += 32)
+            {
+                Color32 pixel = pixels[i];
+                double luminance = (0.2126d * pixel.r + 0.7152d * pixel.g + 0.0722d * pixel.b) / 255d;
+                luminanceSum += luminance;
+                luminanceSquaredSum += luminance * luminance;
+                sampleCount++;
+            }
+
+            double mean = luminanceSum / Math.Max(1, sampleCount);
+            double variance = luminanceSquaredSum / Math.Max(1, sampleCount) - mean * mean;
+            if (mean > 0.92d)
+                throw new InvalidOperationException($"The headset waiting view is too bright (mean luminance {mean:F3}).");
+            if (variance < 0.0004d)
+                throw new InvalidOperationException($"The headset waiting view appears blank or flat (variance {variance:F5}).");
+
+            string outputPath = Path.GetFullPath("Temp/ExperimentSetupHeadsetWaitingView.png");
+            Directory.CreateDirectory(Path.GetDirectoryName(outputPath));
+            File.WriteAllBytes(outputPath, screenshot.EncodeToPNG());
+            Debug.Log($"[ExperimentSetup] Headset waiting view passed: mean={mean:F3}, variance={variance:F5}, screenshot={outputPath}");
+        }
+        catch (Exception exception)
+        {
+            Debug.LogException(exception);
+        }
+        finally
+        {
+            if (screenshot != null)
+                UnityEngine.Object.DestroyImmediate(screenshot);
+            if (renderTexture != null)
+                UnityEngine.Object.DestroyImmediate(renderTexture);
+            SessionState.EraseBool(HeadsetCaptureSessionKey);
+            EditorApplication.isPlaying = false;
+        }
+    }
+
     static void UpdateBuildSettings()
     {
         var requiredPaths = new[]
@@ -172,7 +451,8 @@ public static class ExperimentSetupSceneBuilder
             SetupScenePath,
             MainScenePath,
             WorkloadScenePath,
-            QuestionnaireScenePath
+            QuestionnaireScenePath,
+            ComparisonScenePath
         };
         var required = new HashSet<string>(requiredPaths, StringComparer.OrdinalIgnoreCase);
         var scenes = new List<EditorBuildSettingsScene>(requiredPaths.Length + EditorBuildSettings.scenes.Length);

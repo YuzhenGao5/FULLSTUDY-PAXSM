@@ -1,6 +1,23 @@
+using System;
 using System.Collections.Generic;
+using System.IO;
 
 namespace PAXSMStudyAgent;
+
+internal static class StudyPaths
+{
+	public static string DefaultOutputFolder
+	{
+		get
+		{
+			string desktop = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
+			string root = string.IsNullOrWhiteSpace(desktop)
+				? Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments)
+				: desktop;
+			return Path.Combine(root, "CARE-XR Data");
+		}
+	}
+}
 
 internal sealed class StudyConfig
 {
@@ -48,7 +65,7 @@ internal sealed class StudyConfig
 
 	public string recommendationRationale { get; set; } = "";
 
-	public string outputFolder { get; set; } = "C:/PAXSM_FullStudy_Data";
+	public string outputFolder { get; set; } = StudyPaths.DefaultOutputFolder;
 
 	public string outputSubfolder { get; set; } = "ExportsCSV";
 

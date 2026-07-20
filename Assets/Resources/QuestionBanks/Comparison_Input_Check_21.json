@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "scale": 21,
+  "default_mode": "slider",
+  "labels": ["1", "6", "11", "16", "21"],
+  "items": [
+    { "id": "input_check_target_04", "stem": "For this practice item, select value 4." },
+    { "id": "input_check_target_18", "stem": "For this practice item, select value 18." },
+    { "id": "input_check_target_08", "stem": "For this practice item, select value 8." },
+    { "id": "input_check_target_14", "stem": "For this practice item, select value 14." },
+    { "id": "input_check_target_02", "stem": "For this practice item, select value 2." },
+    { "id": "input_check_target_20", "stem": "For this practice item, select value 20." },
+    { "id": "input_check_target_06", "stem": "For this practice item, select value 6." },
+    { "id": "input_check_target_16", "stem": "For this practice item, select value 16." }
+  ]
+}
