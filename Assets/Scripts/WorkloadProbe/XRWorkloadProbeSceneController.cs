@@ -21,6 +21,8 @@ public partial class XRWorkloadProbeSceneController : MonoBehaviour
     public class ProbeBlockProfile
     {
         public string blockId = "baseline";
+        [Tooltip("Stable task definition shared by repeated block instances. Leave empty to use Block Id.")]
+        public string taskProfileId = "";
         public string displayName = "Baseline";
         public string targetTlxDimension = "baseline";
         [Range(1, 3)] public int ruleComplexity = 1;
@@ -63,6 +65,7 @@ public partial class XRWorkloadProbeSceneController : MonoBehaviour
     class TrialRecord
     {
         public string blockId = "";
+        public string taskProfileId = "";
         public string targetDimension = "";
         public int presentationOrder;
         public int trialIndex;
@@ -95,6 +98,18 @@ public partial class XRWorkloadProbeSceneController : MonoBehaviour
         public float pointerPeakSpeed;
         public int pauseCount;
         public int hoverChangeCount;
+    }
+
+    class InterBlockConfirmationRecord
+    {
+        public string fromBlockId = "";
+        public string toBlockId = "";
+        public int fromPresentationOrder;
+        public int toPresentationOrder;
+        public float shownRealtime;
+        public float confirmedRealtime;
+        public float waitSeconds;
+        public string inputSource = "";
     }
 
     class TlxItem
@@ -304,10 +319,17 @@ public partial class XRWorkloadProbeSceneController : MonoBehaviour
     public string participantId = "P001";
     [Range(1, 99)] public int sessionNumber = 2;
     public string conditionLabel = "WorkloadProbe";
+    [Tooltip("Keep baseline and combined_high fixed; randomize only cognitive_heavy, physical_heavy, and temporal_heavy.")]
     public bool randomizeWorkloadBlocks = false;
     public bool startAutomatically = true;
     public bool writeCsvOnQuit = true;
     public string outputFolderName = "XRWorkloadProbe_Data";
+
+    [Header("Inter-block Confirmation")]
+    public bool requireParticipantConfirmationBetweenBlocks = false;
+    [TextArea(2, 4)]
+    public string interBlockConfirmationPrompt =
+        "Part 1 is complete. When you are ready, press A on the right controller to begin Part 2.";
 
     [Header("Inter-block PAXSM Questionnaire")]
     public bool collectQuestionnaireBetweenBlocks = true;
@@ -393,7 +415,10 @@ public partial class XRWorkloadProbeSceneController : MonoBehaviour
     Material _questionnairePanelMaterial;
     readonly Dictionary<string, Material> _colorMaterials = new Dictionary<string, Material>();
     readonly List<TargetInfo> _targets = new List<TargetInfo>();
+    readonly List<ProbeBlockProfile> _runOrderUsed = new List<ProbeBlockProfile>();
     readonly List<TrialRecord> _trialRecords = new List<TrialRecord>();
+    readonly List<InterBlockConfirmationRecord> _interBlockConfirmationRecords =
+        new List<InterBlockConfirmationRecord>();
     readonly List<QuestionnaireRecord> _questionnaireRecords = new List<QuestionnaireRecord>();
     readonly List<QuestionnaireStageEvent> _questionnaireStageEvents = new List<QuestionnaireStageEvent>();
     readonly List<QuestionnaireRawTraceRecord> _questionnaireRawTraceRecords = new List<QuestionnaireRawTraceRecord>();
@@ -484,7 +509,11 @@ public partial class XRWorkloadProbeSceneController : MonoBehaviour
         ApplySyntheticParticipantSettings();
 #endif
         if (ExperimentRunContext.IsConfigured)
+        {
             participantId = ExperimentRunContext.ParticipantIdOr(participantId);
+            if (ExperimentRunContext.SessionNumber > 0)
+                sessionNumber = ExperimentRunContext.SessionNumber;
+        }
 
         questionnaireKnobDiameterMeters = RuntimeQuestionnaireKnobDiameterMeters;
         EnsureCamera();
@@ -497,8 +526,7 @@ public partial class XRWorkloadProbeSceneController : MonoBehaviour
 
     void EnsureProbeBehaviorCollector()
     {
-        if (questionnaireOnlyMode ||
-            !string.Equals(gameObject.scene.name, "XRWorkloadProbeScene", StringComparison.Ordinal))
+        if (questionnaireOnlyMode)
             return;
 
         _probeBehaviorCollector = GetComponent<XRWorkloadProbeBehaviorCollector>();
@@ -570,6 +598,8 @@ public partial class XRWorkloadProbeSceneController : MonoBehaviour
 
         _blockIndex = 0;
         List<ProbeBlockProfile> runOrder = BuildRunOrder();
+        _runOrderUsed.Clear();
+        _runOrderUsed.AddRange(runOrder);
         _runBlockCount = runOrder.Count;
 
         ShowIntro();
@@ -597,6 +627,9 @@ public partial class XRWorkloadProbeSceneController : MonoBehaviour
                 yield return RunBlockQuestionnaire(_currentProfile);
             else
                 yield return WaitForSecondsOrN(2f);
+
+            if (requireParticipantConfirmationBetweenBlocks && _blockIndex < runOrder.Count - 1)
+                yield return WaitForInterBlockConfirmation(_currentProfile, runOrder[_blockIndex + 1]);
         }
 
         WriteCsvFiles("completed");
@@ -648,21 +681,34 @@ public partial class XRWorkloadProbeSceneController : MonoBehaviour
         if (!randomizeWorkloadBlocks || source.Count <= 1)
             return source;
 
-        int baselineIndex = source.FindIndex(p => string.Equals(p.blockId, "baseline", StringComparison.OrdinalIgnoreCase));
-        var runOrder = new List<ProbeBlockProfile>();
-        if (baselineIndex >= 0)
-        {
-            runOrder.Add(source[baselineIndex]);
-            source.RemoveAt(baselineIndex);
-        }
-
+        var randomizedProfiles = new List<ProbeBlockProfile>();
+        var randomizedSlots = new List<int>();
         for (int i = 0; i < source.Count; i++)
         {
-            int j = UnityEngine.Random.Range(i, source.Count);
-            (source[i], source[j]) = (source[j], source[i]);
+            if (!IsRandomizedMiddleWorkloadBlock(source[i]))
+                continue;
+            randomizedProfiles.Add(source[i]);
+            randomizedSlots.Add(i);
         }
-        runOrder.AddRange(source);
-        return runOrder;
+
+        for (int i = 0; i < randomizedProfiles.Count; i++)
+        {
+            int j = UnityEngine.Random.Range(i, randomizedProfiles.Count);
+            (randomizedProfiles[i], randomizedProfiles[j]) = (randomizedProfiles[j], randomizedProfiles[i]);
+        }
+
+        for (int i = 0; i < randomizedSlots.Count; i++)
+            source[randomizedSlots[i]] = randomizedProfiles[i];
+        return source;
+    }
+
+    static bool IsRandomizedMiddleWorkloadBlock(ProbeBlockProfile profile)
+    {
+        if (profile == null || string.IsNullOrWhiteSpace(profile.blockId))
+            return false;
+        return string.Equals(profile.blockId, "cognitive_heavy", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(profile.blockId, "physical_heavy", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(profile.blockId, "temporal_heavy", StringComparison.OrdinalIgnoreCase);
     }
 
     IEnumerator WaitForSecondsOrN(float seconds)
@@ -679,6 +725,98 @@ public partial class XRWorkloadProbeSceneController : MonoBehaviour
         while (_waitingForContinue && Time.time < end)
             yield return null;
         _waitingForContinue = false;
+    }
+
+    IEnumerator WaitForInterBlockConfirmation(ProbeBlockProfile current, ProbeBlockProfile next)
+    {
+        ClearTargets();
+        if (_selectionRayRenderer != null)
+            _selectionRayRenderer.enabled = false;
+        if (_timerText != null)
+            _timerText.text = "";
+        _feedbackText.text = "Waiting for participant confirmation";
+        _titleText.text = $"Part {_blockIndex + 1} complete";
+        _cueText.text = interBlockConfirmationPrompt;
+        _statusText.text = "Press A on the right controller.\nDesktop test: Enter, Space, or left mouse click.";
+
+        var record = new InterBlockConfirmationRecord
+        {
+            fromBlockId = current != null ? current.blockId : "",
+            toBlockId = next != null ? next.blockId : "",
+            fromPresentationOrder = _blockIndex + 1,
+            toPresentationOrder = _blockIndex + 2,
+            shownRealtime = Time.realtimeSinceStartup
+        };
+
+#if UNITY_EDITOR
+        if (SyntheticParticipantActive)
+        {
+            yield return new WaitForSecondsRealtime(0.08f);
+            record.confirmedRealtime = Time.realtimeSinceStartup;
+            record.waitSeconds = record.confirmedRealtime - record.shownRealtime;
+            record.inputSource = "synthetic";
+            _interBlockConfirmationRecords.Add(record);
+            yield break;
+        }
+#endif
+
+        while (IsInterBlockContinueHeldNow(out _))
+            yield return null;
+
+        string inputSource = "";
+        while (!IsInterBlockContinueHeldNow(out inputSource))
+            yield return null;
+
+        record.confirmedRealtime = Time.realtimeSinceStartup;
+        record.waitSeconds = record.confirmedRealtime - record.shownRealtime;
+        record.inputSource = inputSource;
+        _interBlockConfirmationRecords.Add(record);
+
+        while (IsInterBlockContinueHeldNow(out _))
+            yield return null;
+    }
+
+    bool IsInterBlockContinueHeldNow(out string inputSource)
+    {
+        inputSource = "";
+        InputDevices.GetDevicesAtXRNode(XRNode.RightHand, _rightHandDevices);
+        for (int i = 0; i < _rightHandDevices.Count; i++)
+        {
+            InputDevice device = _rightHandDevices[i];
+            if (!device.isValid)
+                continue;
+            if (device.TryGetFeatureValue(CommonUsages.primaryButton, out bool primary) && primary)
+            {
+                inputSource = "right_primary_button";
+                return true;
+            }
+        }
+
+#if ENABLE_INPUT_SYSTEM
+        InputSystemKeyboard keyboard = InputSystemKeyboard.current;
+        if (keyboard != null)
+        {
+            if ((keyboard.enterKey != null && keyboard.enterKey.isPressed) ||
+                (keyboard.numpadEnterKey != null && keyboard.numpadEnterKey.isPressed))
+            {
+                inputSource = "keyboard_enter";
+                return true;
+            }
+            if (keyboard.spaceKey != null && keyboard.spaceKey.isPressed)
+            {
+                inputSource = "keyboard_space";
+                return true;
+            }
+        }
+
+        InputSystemMouse mouse = InputSystemMouse.current;
+        if (mouse != null && mouse.leftButton.isPressed)
+        {
+            inputSource = "mouse_left";
+            return true;
+        }
+#endif
+        return false;
     }
 
     void UpdateTimerDisplay(float secondsRemaining)
@@ -713,10 +851,11 @@ public partial class XRWorkloadProbeSceneController : MonoBehaviour
         _currentTrial = new TrialRecord
         {
             blockId = profile.blockId,
+            taskProfileId = EffectiveTaskProfileId(profile),
             targetDimension = profile.targetTlxDimension,
             presentationOrder = _blockIndex + 1,
             trialIndex = trialIndex + 1,
-            scheduleId = $"{profile.blockId}_T{trialIndex + 1:00}",
+            scheduleId = $"{EffectiveTaskProfileId(profile)}_T{trialIndex + 1:00}",
             cue = cue,
             rule = rule,
             targetLayout = targetLayout,
@@ -838,7 +977,7 @@ public partial class XRWorkloadProbeSceneController : MonoBehaviour
 
     TrialSpec GetTrialSpec(ProbeBlockProfile profile, int trialIndex)
     {
-        TrialSpec[] schedule = GetPresetSchedule(profile.blockId);
+        TrialSpec[] schedule = GetPresetSchedule(EffectiveTaskProfileId(profile));
         if (schedule.Length == 0)
             return new TrialSpec(
                 RuleTypeForComplexity(profile.ruleComplexity, trialIndex),
@@ -848,6 +987,15 @@ public partial class XRWorkloadProbeSceneController : MonoBehaviour
         TrialSpec spec = schedule[trialIndex % schedule.Length];
         spec.ruleType = RuleTypeForComplexity(profile.ruleComplexity, trialIndex);
         return spec;
+    }
+
+    static string EffectiveTaskProfileId(ProbeBlockProfile profile)
+    {
+        if (profile == null)
+            return "";
+        return string.IsNullOrWhiteSpace(profile.taskProfileId)
+            ? profile.blockId
+            : profile.taskProfileId.Trim();
     }
 
     string RuleTypeForComplexity(int complexity, int trialIndex)
@@ -955,6 +1103,7 @@ public partial class XRWorkloadProbeSceneController : MonoBehaviour
                     new TrialSpec("direct-color", 2, 3)
                 };
             case "combined_high":
+            case "combined_high_v1":
                 return new[]
                 {
                     new TrialSpec("direct-color", 0, 0),
@@ -1460,7 +1609,7 @@ public partial class XRWorkloadProbeSceneController : MonoBehaviour
             return;
 
         _selectionRayRenderer.enabled = showSelectionRay &&
-                                        (_trialActive || _comparisonTaskActive || _questionnaireStageActive);
+                                        (_trialActive || _questionnaireStageActive);
         if (!_selectionRayRenderer.enabled)
             return;
 
@@ -1538,22 +1687,6 @@ public partial class XRWorkloadProbeSceneController : MonoBehaviour
             timeLimitSeconds = 2.25f,
             trialsPerBlock = 10,
             rationale = "Short selection window should increase perceived time pressure."
-        });
-        blockProfiles.Add(new ProbeBlockProfile
-        {
-            blockId = "combined_high",
-            displayName = "Combined-high",
-            targetTlxDimension = "Effort / overall workload",
-            ruleComplexity = 3,
-            targetCount = 7,
-            distractorCount = 6,
-            targetDistance = 2.2f,
-            targetSize = 0.16f,
-            timeLimitSeconds = 2.5f,
-            feedbackDelaySeconds = 0.35f,
-            controlNoiseDegrees = 1.5f,
-            trialsPerBlock = 10,
-            rationale = "Combined cognitive, physical, temporal, and feedback demands should increase perceived effort."
         });
     }
 
@@ -1771,6 +1904,11 @@ public partial class XRWorkloadProbeSceneController : MonoBehaviour
         _feedbackText.text = "";
 
         TlxItem[] items = BuildTlxItems();
+        if (questionnaireComparisonMode && _comparisonQuestionnaireItemLimit > 0 &&
+            items.Length > _comparisonQuestionnaireItemLimit)
+        {
+            Array.Resize(ref items, _comparisonQuestionnaireItemLimit);
+        }
         if (questionnaireComparisonMode &&
             questionnaireInputMethod == QuestionnaireInputMethod.PointAndClick)
         {
@@ -3938,10 +4076,21 @@ public partial class XRWorkloadProbeSceneController : MonoBehaviour
         {
             string trialPath = Path.Combine(folder, $"WorkloadProbe_Trials_{participantId}_{stamp}_{reason}.csv");
             string blockPath = Path.Combine(folder, $"WorkloadProbe_Blocks_{participantId}_{stamp}_{reason}.csv");
+            string runOrderPath = Path.Combine(folder, $"WorkloadProbe_RunOrder_{participantId}_{stamp}_{reason}.csv");
             WriteCheckpointFile(trialPath, BuildTrialCsv());
             WriteCheckpointFile(blockPath, BuildBlockCsv());
+            WriteCheckpointFile(runOrderPath, BuildRunOrderCsv());
             savedPaths.Add(trialPath);
             savedPaths.Add(blockPath);
+            savedPaths.Add(runOrderPath);
+            if (requireParticipantConfirmationBetweenBlocks)
+            {
+                string confirmationPath = Path.Combine(
+                    folder,
+                    $"WorkloadProbe_InterBlockConfirmations_{participantId}_{stamp}_{reason}.csv");
+                WriteCheckpointFile(confirmationPath, BuildInterBlockConfirmationCsv());
+                savedPaths.Add(confirmationPath);
+            }
         }
 
         string suffix = $"{participantId}_{stamp}_{reason}";
@@ -4040,9 +4189,13 @@ public partial class XRWorkloadProbeSceneController : MonoBehaviour
         {
             Path.Combine(folder, $"WorkloadProbe_Trials_{outputSuffix}.csv"),
             Path.Combine(folder, $"WorkloadProbe_Blocks_{outputSuffix}.csv"),
+            Path.Combine(folder, $"WorkloadProbe_RunOrder_{outputSuffix}.csv"),
             Path.Combine(folder, $"CAREXR_Questionnaire_{outputSuffix}.csv"),
             Path.Combine(folder, $"CAREXR_Questionnaire_StageEvents_{outputSuffix}.csv")
         };
+        if (requireParticipantConfirmationBetweenBlocks)
+            expectedPrimaryPaths.Add(
+                Path.Combine(folder, $"WorkloadProbe_InterBlockConfirmations_{outputSuffix}.csv"));
         if (_questionnaireRecords.Count > 0)
         {
             expectedPrimaryPaths.Add(Path.Combine(folder, $"CAREXR_Questionnaire_RawTrace_{outputSuffix}.csv"));
@@ -4056,7 +4209,7 @@ public partial class XRWorkloadProbeSceneController : MonoBehaviour
         for (int i = 0; i < expectedPrimaryPaths.Count; i++)
             if (File.Exists(expectedPrimaryPaths[i])) observedPrimaryFiles++;
         int mergedFileCount = Directory.Exists(folder)
-            ? Directory.GetFiles(folder, $"KnobBehavior_Merged_{participantId}_*.csv", SearchOption.AllDirectories).Length
+            ? Directory.GetFiles(folder, "KnobBehavior_Merged_*.csv", SearchOption.AllDirectories).Length
             : 0;
 
         var rows = new List<string>();
@@ -4101,6 +4254,70 @@ public partial class XRWorkloadProbeSceneController : MonoBehaviour
         AddCheck("trial_rows", I(expectedTrialCount), I(_trialRecords.Count),
             _trialRecords.Count == expectedTrialCount, true,
             "Expected count is the sum of trialsPerBlock in the configured profiles.");
+
+        int expectedConfirmationRows = requireParticipantConfirmationBetweenBlocks
+            ? Mathf.Max(0, expectedBlockCount - 1)
+            : 0;
+        bool confirmationOrderAligned = _interBlockConfirmationRecords.Count == expectedConfirmationRows;
+        for (int i = 0; i < _interBlockConfirmationRecords.Count && confirmationOrderAligned; i++)
+        {
+            InterBlockConfirmationRecord record = _interBlockConfirmationRecords[i];
+            confirmationOrderAligned = record.fromPresentationOrder == i + 1 &&
+                                       record.toPresentationOrder == i + 2 &&
+                                       record.confirmedRealtime >= record.shownRealtime &&
+                                       !string.IsNullOrWhiteSpace(record.inputSource);
+            if (confirmationOrderAligned && i + 1 < _runOrderUsed.Count)
+            {
+                confirmationOrderAligned =
+                    string.Equals(record.fromBlockId, _runOrderUsed[i].blockId, StringComparison.OrdinalIgnoreCase) &&
+                    string.Equals(record.toBlockId, _runOrderUsed[i + 1].blockId, StringComparison.OrdinalIgnoreCase);
+            }
+        }
+        AddCheck("inter_block_confirmations", I(expectedConfirmationRows),
+            I(_interBlockConfirmationRecords.Count), confirmationOrderAligned,
+            requireParticipantConfirmationBetweenBlocks,
+            "Each transition must be released by an explicit fresh participant confirmation and retain its input source.");
+
+        var trialOrderByBlock = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        bool trialOrderConsistent = true;
+        for (int i = 0; i < _trialRecords.Count; i++)
+        {
+            TrialRecord trial = _trialRecords[i];
+            if (trialOrderByBlock.TryGetValue(trial.blockId, out int existingOrder) &&
+                existingOrder != trial.presentationOrder)
+                trialOrderConsistent = false;
+            else
+                trialOrderByBlock[trial.blockId] = trial.presentationOrder;
+        }
+
+        bool runOrderAligned = _runOrderUsed.Count == expectedBlockCount;
+        for (int i = 0; i < _runOrderUsed.Count && runOrderAligned; i++)
+        {
+            ProbeBlockProfile profile = _runOrderUsed[i];
+            runOrderAligned = profile != null &&
+                              trialOrderByBlock.TryGetValue(profile.blockId, out int observedOrder) &&
+                              observedOrder == i + 1;
+        }
+        AddCheck("run_order_alignment", $"{expectedBlockCount} block/order mappings",
+            I(trialOrderByBlock.Count), trialOrderConsistent && runOrderAligned, true,
+            "The explicit run-order manifest must match the block IDs and presentation orders in trial rows.");
+
+        bool questionnaireOrderAligned = true;
+        for (int i = 0; i < _questionnaireRecords.Count; i++)
+        {
+            QuestionnaireRecord record = _questionnaireRecords[i];
+            if (!trialOrderByBlock.TryGetValue(record.blockId, out int trialOrder) ||
+                trialOrder != record.presentationOrder)
+            {
+                questionnaireOrderAligned = false;
+                break;
+            }
+        }
+        AddCheck("questionnaire_block_order_alignment", "all questionnaire rows match trial block/order",
+            questionnaireOrderAligned ? "all matched" : "mismatch detected",
+            questionnaireOrderAligned, collectQuestionnaireBetweenBlocks,
+            "Randomized cognitive, physical, and temporal blocks must retain the same blockId and presentationOrder in questionnaire data.");
+
         AddCheck("questionnaire_rows", I(expectedQuestionnaireRows), I(_questionnaireRecords.Count),
             _questionnaireRecords.Count == expectedQuestionnaireRows, collectQuestionnaireBetweenBlocks,
             "Each completed block should contain every configured questionnaire item.");
@@ -4289,11 +4506,11 @@ public partial class XRWorkloadProbeSceneController : MonoBehaviour
     string BuildTrialCsv()
     {
         var sb = new StringBuilder();
-        sb.AppendLine("participantId,sessionNumber,conditionLabel,taskType,blockId,targetDimension,presentationOrder,trialIndex,scheduleId,cue,rule,targetLayout,ruleComplexity,targetCount,distractorCount,targetDistance,targetSize,timeLimit,successThresholdStrictness,effectiveSelectionCone,effectiveSelectionAssistRadius,gazeFallbackAllowed,feedbackDelay,controlNoise,decisionRt,timeout,isCorrect,correctHapticPlayed,correctHapticSuppressed,correctIndex,selectedIndex,pointerPath,pointerPeakSpeed,pauseCount,hoverChangeCount");
+        sb.AppendLine("participantId,sessionNumber,conditionLabel,taskType,blockId,taskProfileId,targetDimension,presentationOrder,trialIndex,scheduleId,cue,rule,targetLayout,ruleComplexity,targetCount,distractorCount,targetDistance,targetSize,timeLimit,successThresholdStrictness,effectiveSelectionCone,effectiveSelectionAssistRadius,gazeFallbackAllowed,feedbackDelay,controlNoise,decisionRt,timeout,isCorrect,correctHapticPlayed,correctHapticSuppressed,correctIndex,selectedIndex,pointerPath,pointerPeakSpeed,pauseCount,hoverChangeCount");
         foreach (TrialRecord r in _trialRecords)
         {
             sb.AppendLine(string.Join(",",
-                Csv(participantId), I(sessionNumber), Csv(EffectiveConditionLabel()), Csv(r.blockId), Csv(r.blockId), Csv(r.targetDimension), r.presentationOrder, r.trialIndex,
+                Csv(participantId), I(sessionNumber), Csv(EffectiveConditionLabel()), Csv(r.blockId), Csv(r.blockId), Csv(r.taskProfileId), Csv(r.targetDimension), r.presentationOrder, r.trialIndex,
                 Csv(r.scheduleId), Csv(r.cue), Csv(r.rule), Csv(r.targetLayout), r.ruleComplexity,
                 r.targetCount, r.distractorCount, F(r.targetDistance), F(r.targetSize), F(r.timeLimit),
                 F(r.successThresholdStrictness), F(r.effectiveSelectionCone), F(r.effectiveSelectionAssistRadius),
@@ -4309,10 +4526,12 @@ public partial class XRWorkloadProbeSceneController : MonoBehaviour
     string BuildBlockCsv()
     {
         var sb = new StringBuilder();
-        sb.AppendLine("participantId,sessionNumber,conditionLabel,taskType,blockId,targetDimension,ruleComplexity,targetCount,distractorCount,targetDistance,targetSize,timeLimit,successThresholdStrictness,effectiveSelectionCone,effectiveSelectionAssistRadius,gazeFallbackAllowed,feedbackDelay,controlNoise,trials,accuracy,meanDecisionRt,timeoutCount,meanPointerPath,meanPeakSpeed,totalPauseCount,totalHoverChangeCount");
-        foreach (ProbeBlockProfile profile in blockProfiles)
+        sb.AppendLine("participantId,sessionNumber,conditionLabel,taskType,blockId,taskProfileId,targetDimension,presentationOrder,ruleComplexity,targetCount,distractorCount,targetDistance,targetSize,timeLimit,successThresholdStrictness,effectiveSelectionCone,effectiveSelectionAssistRadius,gazeFallbackAllowed,feedbackDelay,controlNoise,trials,accuracy,meanDecisionRt,timeoutCount,meanPointerPath,meanPeakSpeed,totalPauseCount,totalHoverChangeCount");
+        List<ProbeBlockProfile> summaryOrder = _runOrderUsed.Count > 0 ? _runOrderUsed : blockProfiles;
+        foreach (ProbeBlockProfile profile in summaryOrder)
         {
             int n = 0;
+            int presentationOrder = 0;
             int correct = 0;
             int timeout = 0;
             float rt = 0f;
@@ -4324,6 +4543,8 @@ public partial class XRWorkloadProbeSceneController : MonoBehaviour
             {
                 if (r.blockId != profile.blockId) continue;
                 n++;
+                if (presentationOrder == 0)
+                    presentationOrder = r.presentationOrder;
                 if (r.isCorrect) correct++;
                 if (r.timeout) timeout++;
                 rt += r.decisionRt;
@@ -4334,14 +4555,57 @@ public partial class XRWorkloadProbeSceneController : MonoBehaviour
             }
             if (n == 0) continue;
             sb.AppendLine(string.Join(",",
-                Csv(participantId), I(sessionNumber), Csv(EffectiveConditionLabel()), Csv(profile.blockId), Csv(profile.blockId), Csv(profile.targetTlxDimension),
-                Mathf.Clamp(profile.ruleComplexity, 1, 3), EffectiveTargetCount(profile),
+                Csv(participantId), I(sessionNumber), Csv(EffectiveConditionLabel()), Csv(profile.blockId), Csv(profile.blockId), Csv(EffectiveTaskProfileId(profile)), Csv(profile.targetTlxDimension),
+                I(presentationOrder), Mathf.Clamp(profile.ruleComplexity, 1, 3), EffectiveTargetCount(profile),
                 Mathf.Max(1, EffectiveTargetCount(profile) - 1), F(profile.targetDistance), F(profile.targetSize),
                 F(profile.timeLimitSeconds), F(Mathf.Clamp01(profile.successThresholdStrictness)),
                 F(EffectiveSelectionCone(profile)), F(EffectiveSelectionAssistRadius(profile)),
                 IsGazeFallbackAllowed(profile) ? "1" : "0", F(profile.feedbackDelaySeconds), F(profile.controlNoiseDegrees), n,
                 F(correct / (float)n), F(rt / n), timeout,
                 F(path / n), F(peak / n), pauses, hovers));
+        }
+        return sb.ToString();
+    }
+
+    string BuildRunOrderCsv()
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine(
+            "participantId,sessionNumber,conditionLabel,presentationOrder,blockId,taskProfileId,displayName," +
+            "targetDimension,trialsPerBlock,configuredOrder,randomizedMiddleBlock");
+        for (int i = 0; i < _runOrderUsed.Count; i++)
+        {
+            ProbeBlockProfile profile = _runOrderUsed[i];
+            if (profile == null)
+                continue;
+            int configuredOrder = blockProfiles.IndexOf(profile) + 1;
+            sb.AppendLine(string.Join(",", new[]
+            {
+                Csv(participantId), I(sessionNumber), Csv(EffectiveConditionLabel()), I(i + 1),
+                Csv(profile.blockId), Csv(EffectiveTaskProfileId(profile)), Csv(profile.displayName), Csv(profile.targetTlxDimension),
+                I(profile.trialsPerBlock), I(configuredOrder),
+                B(randomizeWorkloadBlocks && IsRandomizedMiddleWorkloadBlock(profile))
+            }));
+        }
+        return sb.ToString();
+    }
+
+    string BuildInterBlockConfirmationCsv()
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine(
+            "participantId,sessionNumber,conditionLabel,fromBlockId,toBlockId," +
+            "fromPresentationOrder,toPresentationOrder,shownRealtime,confirmedRealtime,waitSeconds,inputSource");
+        for (int i = 0; i < _interBlockConfirmationRecords.Count; i++)
+        {
+            InterBlockConfirmationRecord r = _interBlockConfirmationRecords[i];
+            sb.AppendLine(string.Join(",", new[]
+            {
+                Csv(participantId), I(sessionNumber), Csv(EffectiveConditionLabel()),
+                Csv(r.fromBlockId), Csv(r.toBlockId), I(r.fromPresentationOrder),
+                I(r.toPresentationOrder), F(r.shownRealtime), F(r.confirmedRealtime),
+                F(r.waitSeconds), Csv(r.inputSource)
+            }));
         }
         return sb.ToString();
     }

@@ -4,7 +4,6 @@ using System.Collections.Generic;
 using System.IO;
 using System.Text;
 using UnityEngine;
-using UnityEngine.Serialization;
 using UnityEngine.XR;
 
 public partial class XRWorkloadProbeSceneController
@@ -25,41 +24,6 @@ public partial class XRWorkloadProbeSceneController
             this.method = method;
             this.formIndex = formIndex;
         }
-    }
-
-    struct ComparisonMathQuestion
-    {
-        public string problem;
-        public int correctAnswer;
-        public int[] options;
-
-        public ComparisonMathQuestion(string problem, int correctAnswer, params int[] options)
-        {
-            this.problem = problem;
-            this.correctAnswer = correctAnswer;
-            this.options = options;
-        }
-    }
-
-    class ComparisonTaskRecord
-    {
-        public int presentationOrder;
-        public string orderCode = "";
-        public string method = "";
-        public string taskDemand = "";
-        public string form = "";
-        public int trialIndex;
-        public string problem = "";
-        public string options = "";
-        public int correctAnswer;
-        public int selectedAnswer = -1;
-        public int selectedIndex = -1;
-        public bool isCorrect;
-        public bool timeout;
-        public float decisionRt;
-        public float pointerPath;
-        public float pointerPeakSpeed;
-        public int hoverChangeCount;
     }
 
     sealed class ClassicPointClickResponseState
@@ -114,20 +78,17 @@ public partial class XRWorkloadProbeSceneController
     public bool questionnaireComparisonMode;
     public string comparisonWorkloadBankResourcesPath = "QuestionBanks/NASA_TLX_21_Comparison";
     public string comparisonSusBankResourcesPath = "QuestionBanks/SUS";
-    public string comparisonInputCheckBankResourcesPath = "QuestionBanks/Comparison_Input_Check_21";
-    [FormerlySerializedAs("comparisonArithmeticTrialsPerBlock")]
-    [Range(2, 4)] public int comparisonArithmeticTrialsPerMethod = 4;
-    [Range(10f, 60f)] public float comparisonTrialTimeoutSeconds = 25f;
-    public bool comparisonCollectConfidence = true;
+    public string comparisonPracticeBankResourcesPath = "QuestionBanks/Comparison_Practice_Targets_21";
+    public string comparisonFormalBankAResourcesPath = "QuestionBanks/Comparison_Formal_Targets_A_21";
+    public string comparisonFormalBankBResourcesPath = "QuestionBanks/Comparison_Formal_Targets_B_21";
+    [Range(8, 12)] public int comparisonFormalTrialsPerMethod = 12;
+    [Range(5f, 120f)] public float comparisonRestSeconds = 20f;
+    public bool comparisonCollectConfidence = false;
 
     [Header("Classic Point-and-click Baseline")]
     [Range(1, 3)] public int comparisonPointClickItemsPerPage = 1;
     [Range(0.035f, 0.09f)] public float comparisonPointClickRadioDiameterMeters = 0.055f;
 
-    readonly List<ComparisonTaskRecord> _comparisonTaskRecords = new List<ComparisonTaskRecord>();
-    readonly List<GameObject> _comparisonOptionObjects = new List<GameObject>();
-    readonly List<Renderer> _comparisonOptionRenderers = new List<Renderer>();
-    readonly List<TextMesh> _comparisonOptionLabels = new List<TextMesh>();
     readonly List<GameObject> _questionnairePointClickTargets = new List<GameObject>();
     readonly List<GameObject> _questionnairePointClickLabels = new List<GameObject>();
     readonly List<ClassicPointClickRadioTarget> _classicPointClickRadioTargets =
@@ -135,7 +96,6 @@ public partial class XRWorkloadProbeSceneController
     readonly List<ClassicPointClickPageRecord> _classicPointClickPageRecords =
         new List<ClassicPointClickPageRecord>();
 
-    GameObject _comparisonTaskRoot;
     GameObject _classicPointClickPageRoot;
     GameObject _classicPointClickPreviousButton;
     GameObject _classicPointClickNextButton;
@@ -145,24 +105,16 @@ public partial class XRWorkloadProbeSceneController
     TextMesh _classicPointClickNextLabel;
     TextMesh _classicPointClickStatusText;
     bool _classicPointClickSyntheticScreenshotCaptured;
-    bool _comparisonTaskActive;
     bool _comparisonPointClickWasHeld;
     string _comparisonSequenceCode = "not_run";
+    readonly Dictionary<string, int> _comparisonPresentationOrderByMethod =
+        new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+    readonly Dictionary<string, string> _comparisonTargetFormByMethod =
+        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+    int _comparisonQuestionnaireItemLimit;
 
-    const int ComparisonInputCheckItemCount = 8;
-    const string ComparisonTaskDemandKey = "matched_moderate";
-
-    static readonly ComparisonMathQuestion[] MatchedComparisonQuestions =
-    {
-        new ComparisonMathQuestion("27 + 38 = ?", 65, 55, 63, 65, 67),
-        new ComparisonMathQuestion("74 - 29 = ?", 45, 43, 45, 47, 49),
-        new ComparisonMathQuestion("12 * 7 = ?", 84, 72, 82, 84, 96),
-        new ComparisonMathQuestion("17 * 6 = ?", 102, 92, 100, 102, 112),
-        new ComparisonMathQuestion("46 + 57 = ?", 103, 93, 101, 103, 113),
-        new ComparisonMathQuestion("83 - 47 = ?", 36, 34, 36, 38, 46),
-        new ComparisonMathQuestion("14 * 6 = ?", 84, 74, 82, 84, 94),
-        new ComparisonMathQuestion("16 * 7 = ?", 112, 102, 110, 112, 122)
-    };
+    const int ComparisonPracticeItemCount = 2;
+    const int ComparisonScaleMidpoint = 11;
 
     protected bool IsQuestionnaireKnobInputActive =>
         questionnaireInputMethod == QuestionnaireInputMethod.PaxsmKnob;
@@ -184,12 +136,13 @@ public partial class XRWorkloadProbeSceneController
         int originalScale = questionnaireScale;
         bool originalConfidence = collectConfidenceAfterEachItem;
         QuestionnaireInputMethod originalMethod = questionnaireInputMethod;
+        int originalItemLimit = _comparisonQuestionnaireItemLimit;
 
         ComparisonBlockSpec[] sequence = BuildComparisonSequence();
         _runBlockCount = sequence.Length;
 
-        _titleText.text = "PAXSM Questionnaire Comparison";
-        _cueText.text = "Complete two matched task blocks, one with each questionnaire interaction method.";
+        _titleText.text = "Controlled Input-Method Comparison";
+        _cueText.text = "You will enter target values with both questionnaire input methods.";
         _statusText.text = $"Order {_comparisonSequenceCode}\nRead the wall, then use the right controller.";
         _timerText.text = "";
         _feedbackText.text = "Press N on the desktop to skip timed instructions.";
@@ -199,26 +152,48 @@ public partial class XRWorkloadProbeSceneController
         {
             _blockIndex = i;
             ComparisonBlockSpec block = sequence[i];
+            string methodKey = ComparisonMethodKey(block.method);
+            string methodLabel = ComparisonMethodLabel(block.method);
+            string targetForm = block.formIndex == 0 ? "A" : "B";
 
             questionnaireInputMethod = block.method;
-            questionnaireBankResourcesPath = comparisonInputCheckBankResourcesPath;
             collectConfidenceAfterEachItem = false;
-            var inputCheckProfile = new ProbeBlockProfile
-            {
-                blockId = $"input_check_{ComparisonMethodKey(block.method)}",
-                displayName = $"Input check for {ComparisonMethodLabel(block.method)}",
-                targetTlxDimension = $"input_accuracy_{ComparisonMethodKey(block.method)}"
-            };
-            _titleText.text = $"{ComparisonMethodLabel(block.method)} practice";
-            _cueText.text = $"Complete {ComparisonInputCheckItemCount} target-value selections before the study block.";
-            _statusText.text = "These items measure selection accuracy and are not questionnaire scores.";
-            yield return WaitForSecondsOrN(2.5f);
-            yield return RunBlockQuestionnaire(inputCheckProfile);
+            yield return RunComparisonMethodTutorial(block);
 
-            yield return RunComparisonArithmeticBlock(block);
+            questionnaireBankResourcesPath = comparisonPracticeBankResourcesPath;
+            _comparisonQuestionnaireItemLimit = ComparisonPracticeItemCount;
+            var practiceProfile = new ProbeBlockProfile
+            {
+                blockId = $"practice_input_{methodKey}",
+                displayName = $"Practice with {methodLabel}",
+                targetTlxDimension = $"practice_excluded_{methodKey}"
+            };
+            _titleText.text = $"{methodLabel} practice";
+            _cueText.text = $"Complete {ComparisonPracticeItemCount} practice target selections.";
+            _statusText.text = "Practice is logged for auditing but excluded from the primary analysis.";
+            yield return WaitForSecondsOrN(2.5f);
+            yield return RunBlockQuestionnaire(practiceProfile);
+
+            questionnaireInputMethod = block.method;
+            questionnaireBankResourcesPath = block.formIndex == 0
+                ? comparisonFormalBankAResourcesPath
+                : comparisonFormalBankBResourcesPath;
+            _comparisonQuestionnaireItemLimit = Mathf.Clamp(comparisonFormalTrialsPerMethod, 8, 12);
+            var formalInputProfile = new ProbeBlockProfile
+            {
+                blockId = $"formal_input_{methodKey}",
+                displayName = $"Formal target input with {methodLabel}",
+                targetTlxDimension = $"formal_input_performance_{methodKey}"
+            };
+            _titleText.text = $"Block {i + 1}/{sequence.Length}: {methodLabel}";
+            _cueText.text = $"Complete {_comparisonQuestionnaireItemLimit} formal target-value trials.";
+            _statusText.text = $"Target order {targetForm}. Use midpoint {ComparisonScaleMidpoint} as the neutral reference.";
+            yield return WaitForSecondsOrN(2.5f);
+            yield return RunBlockQuestionnaire(formalInputProfile);
 
             questionnaireInputMethod = block.method;
             questionnaireBankResourcesPath = comparisonWorkloadBankResourcesPath;
+            _comparisonQuestionnaireItemLimit = 0;
             collectConfidenceAfterEachItem = comparisonCollectConfidence;
             var workloadProfile = new ProbeBlockProfile
             {
@@ -226,11 +201,16 @@ public partial class XRWorkloadProbeSceneController
                 displayName = ComparisonMethodLabel(block.method),
                 targetTlxDimension = "comparison_questionnaire_method"
             };
+            _titleText.text = $"Workload rating: {methodLabel}";
+            _cueText.text = $"Rate the workload of entering the formal target values with {methodLabel}.";
+            _statusText.text = "Answer the six NASA-TLX items about the method you just used.";
+            yield return WaitForSecondsOrN(3f);
             yield return RunBlockQuestionnaire(workloadProfile);
 
             QuestionnaireInputMethod evaluatedMethod = block.method;
             questionnaireInputMethod = QuestionnaireInputMethod.PointAndClick;
             questionnaireBankResourcesPath = comparisonSusBankResourcesPath;
+            _comparisonQuestionnaireItemLimit = 0;
             collectConfidenceAfterEachItem = false;
             var susProfile = new ProbeBlockProfile
             {
@@ -245,325 +225,98 @@ public partial class XRWorkloadProbeSceneController
             _statusText.text = "Please rate that system only. SUS is answered by pointing and clicking for both systems.";
             yield return WaitForSecondsOrN(3.5f);
             yield return RunBlockQuestionnaire(susProfile);
+
+            if (i < sequence.Length - 1)
+                yield return RunComparisonRest(sequence[i + 1].method);
         }
 
         questionnaireBankResourcesPath = originalBank;
         questionnaireScale = originalScale;
         collectConfidenceAfterEachItem = originalConfidence;
         questionnaireInputMethod = originalMethod;
+        _comparisonQuestionnaireItemLimit = originalItemLimit;
 
         WriteCsvFiles("completed");
         _titleText.text = "Comparison Complete";
-        _cueText.text = "All task, questionnaire, Confidence, and SUS records have been saved.";
-        _statusText.text = $"Saved {_comparisonTaskRecords.Count} arithmetic trials and " +
-                           $"{_questionnaireRecords.Count} questionnaire records to:\n{GetOutputFolder()}";
+        _cueText.text = "All formal input, NASA-TLX, and SUS records have been saved.";
+        _statusText.text = $"Saved {CountComparisonFormalRecords()} formal target trials and " +
+                           $"{_questionnaireRecords.Count} total records to:\n{GetOutputFolder()}";
         _timerText.text = "";
         _feedbackText.text = "You may now remove the headset.";
-        ClearComparisonOptions();
     }
 
     ComparisonBlockSpec[] BuildComparisonSequence()
     {
         int group = (ParseParticipantNumber(participantId) - 1) % 4;
+        ComparisonBlockSpec[] sequence;
         switch (group)
         {
             case 1:
                 _comparisonSequenceCode = "B: Click-A / PAXSM-B";
-                return new[]
+                sequence = new[]
                 {
                     new ComparisonBlockSpec(QuestionnaireInputMethod.PointAndClick, 0),
                     new ComparisonBlockSpec(QuestionnaireInputMethod.PaxsmKnob, 1)
                 };
+                break;
             case 2:
                 _comparisonSequenceCode = "C: PAXSM-B / Click-A";
-                return new[]
+                sequence = new[]
                 {
                     new ComparisonBlockSpec(QuestionnaireInputMethod.PaxsmKnob, 1),
                     new ComparisonBlockSpec(QuestionnaireInputMethod.PointAndClick, 0)
                 };
+                break;
             case 3:
                 _comparisonSequenceCode = "D: Click-B / PAXSM-A";
-                return new[]
+                sequence = new[]
                 {
                     new ComparisonBlockSpec(QuestionnaireInputMethod.PointAndClick, 1),
                     new ComparisonBlockSpec(QuestionnaireInputMethod.PaxsmKnob, 0)
                 };
+                break;
             default:
                 _comparisonSequenceCode = "A: PAXSM-A / Click-B";
-                return new[]
+                sequence = new[]
                 {
                     new ComparisonBlockSpec(QuestionnaireInputMethod.PaxsmKnob, 0),
                     new ComparisonBlockSpec(QuestionnaireInputMethod.PointAndClick, 1)
                 };
+                break;
         }
+
+        _comparisonPresentationOrderByMethod.Clear();
+        _comparisonTargetFormByMethod.Clear();
+        for (int i = 0; i < sequence.Length; i++)
+        {
+            string method = ComparisonMethodKey(sequence[i].method);
+            _comparisonPresentationOrderByMethod[method] = i + 1;
+            _comparisonTargetFormByMethod[method] = sequence[i].formIndex == 0 ? "A" : "B";
+        }
+        return sequence;
     }
 
-    IEnumerator RunComparisonArithmeticBlock(ComparisonBlockSpec block)
+    IEnumerator RunComparisonMethodTutorial(ComparisonBlockSpec block)
     {
         string methodLabel = ComparisonMethodLabel(block.method);
-        _titleText.text = $"Block {_blockIndex + 1}/{_runBlockCount}: Matched arithmetic";
-        _cueText.text = "Solve each arithmetic problem and point at the correct answer.";
-        _statusText.text = block.method == QuestionnaireInputMethod.PaxsmKnob
-            ? $"After the task, answer the workload questionnaire using {methodLabel}."
-            : "After the task, answer the workload questionnaire by pointing and clicking.";
+        _titleText.text = $"Standardized tutorial: {methodLabel}";
+        _cueText.text = block.method == QuestionnaireInputMethod.PaxsmKnob
+            ? "Grab the virtual knob, rotate to the requested value, release it, then hold the primary A button to confirm."
+            : "Aim the right-controller ray at the requested value and press the Right Trigger to select it.";
+        _statusText.text = $"The next {ComparisonPracticeItemCount} trials are practice and are excluded from the primary analysis.";
         _timerText.text = "";
-        _feedbackText.text = "Right Trigger: select an answer";
-        yield return WaitForSecondsOrN(3f);
+        _feedbackText.text = "Use the same technique for every trial.";
+        yield return WaitForSecondsOrN(5f);
+    }
 
-        int trialCount = Mathf.Clamp(comparisonArithmeticTrialsPerMethod, 2, 4);
-        for (int trial = 0; trial < trialCount; trial++)
-        {
-            ComparisonMathQuestion question = GetComparisonQuestion(block.formIndex, trial);
-            yield return RunComparisonArithmeticTrial(block, trial, question);
-            yield return new WaitForSeconds(0.35f);
-        }
-
-        _titleText.text = "Task block complete";
-        _cueText.text = "The questionnaire will begin next.";
-        _statusText.text = $"Input method: {methodLabel}";
+    IEnumerator RunComparisonRest(QuestionnaireInputMethod nextMethod)
+    {
+        _titleText.text = "Rest between methods";
+        _cueText.text = $"Please rest before starting {ComparisonMethodLabel(nextMethod)}.";
+        _statusText.text = $"The next method begins in {Mathf.CeilToInt(comparisonRestSeconds)} seconds.";
         _timerText.text = "";
-        _feedbackText.text = "";
-        yield return WaitForSecondsOrN(1.5f);
-    }
-
-    ComparisonMathQuestion GetComparisonQuestion(
-        int formIndex,
-        int trialIndex)
-    {
-        int formOffset = Mathf.Clamp(formIndex, 0, 1) * 4;
-        return MatchedComparisonQuestions[formOffset + Mathf.Clamp(trialIndex, 0, 3)];
-    }
-
-    IEnumerator RunComparisonArithmeticTrial(
-        ComparisonBlockSpec block,
-        int trialIndex,
-        ComparisonMathQuestion question)
-    {
-        ClearComparisonOptions();
-        BuildComparisonOptions(question.options);
-        _comparisonTaskActive = true;
-
-        _titleText.text = $"Arithmetic  {trialIndex + 1}/{Mathf.Clamp(comparisonArithmeticTrialsPerMethod, 2, 4)}";
-        _cueText.text = question.problem;
-        _statusText.text = $"Block {_blockIndex + 1}/{_runBlockCount}  |  Task form {(block.formIndex == 0 ? "A" : "B")}";
-        _feedbackText.text = "Aim at one answer and press the Right Trigger";
-
-        yield return WaitForComparisonPointClickRelease();
-
-        float start = Time.realtimeSinceStartup;
-#if UNITY_EDITOR
-        if (SyntheticParticipantActive)
-            BeginSyntheticComparisonTrial(block, trialIndex, question);
-#endif
-        float lastSampleTime = start;
-        bool hasLastPoint = false;
-        Vector3 lastPoint = Vector3.zero;
-        float pointerPath = 0f;
-        float pointerPeakSpeed = 0f;
-        int hover = -1;
-        int previousHover = -1;
-        int hoverChanges = 0;
-        int selectedIndex = -1;
-        bool timeout = false;
-
-        while (selectedIndex < 0 && !timeout)
-        {
-#if UNITY_EDITOR
-            bool pressed;
-            Ray ray;
-            if (SyntheticParticipantActive)
-                GetSyntheticComparisonPointClick(out ray, out _, out pressed);
-            else
-                pressed = GetComparisonPointClickPressed(out ray, out _);
-#else
-            bool pressed = GetComparisonPointClickPressed(out Ray ray, out _);
-#endif
-            int currentHover = ResolveComparisonOption(ray);
-            if (currentHover != previousHover)
-            {
-                if (currentHover >= 0)
-                    hoverChanges++;
-                previousHover = currentHover;
-            }
-            hover = currentHover;
-            UpdateComparisonOptionHover(hover);
-            UpdateSelectionRayVisual(ray);
-
-            if (TryProjectComparisonPointer(ray, out Vector3 point))
-            {
-                float now = Time.realtimeSinceStartup;
-                float dt = Mathf.Max(0.0001f, now - lastSampleTime);
-                if (hasLastPoint)
-                {
-                    float delta = Vector3.Distance(lastPoint, point);
-                    pointerPath += delta;
-                    pointerPeakSpeed = Mathf.Max(pointerPeakSpeed, delta / dt);
-                }
-                lastPoint = point;
-                hasLastPoint = true;
-                lastSampleTime = now;
-            }
-
-            float elapsed = Time.realtimeSinceStartup - start;
-            float remaining = Mathf.Max(0f, comparisonTrialTimeoutSeconds - elapsed);
-            _timerText.text = $"{remaining:0}";
-            if (elapsed >= comparisonTrialTimeoutSeconds)
-                timeout = true;
-            else if (pressed && hover >= 0)
-                selectedIndex = hover;
-
-            yield return null;
-        }
-
-        _comparisonTaskActive = false;
-        if (_selectionRayRenderer != null)
-            _selectionRayRenderer.enabled = false;
-
-        int selectedAnswer = selectedIndex >= 0 && selectedIndex < question.options.Length
-            ? question.options[selectedIndex]
-            : -1;
-        bool correct = selectedAnswer == question.correctAnswer;
-        float decisionRt = Mathf.Max(0f, Time.realtimeSinceStartup - start);
-
-        _comparisonTaskRecords.Add(new ComparisonTaskRecord
-        {
-            presentationOrder = _blockIndex + 1,
-            orderCode = _comparisonSequenceCode,
-            method = ComparisonMethodKey(block.method),
-            taskDemand = ComparisonTaskDemandKey,
-            form = block.formIndex == 0 ? "A" : "B",
-            trialIndex = trialIndex + 1,
-            problem = question.problem,
-            options = string.Join("|", question.options),
-            correctAnswer = question.correctAnswer,
-            selectedAnswer = selectedAnswer,
-            selectedIndex = selectedIndex,
-            isCorrect = correct,
-            timeout = timeout,
-            decisionRt = decisionRt,
-            pointerPath = pointerPath,
-            pointerPeakSpeed = pointerPeakSpeed,
-            hoverChangeCount = hoverChanges
-        });
-
-        if (timeout)
-        {
-            _feedbackText.text = $"Time ended. Correct answer: {question.correctAnswer}";
-            _feedbackText.color = new Color(1f, 0.65f, 0.25f);
-        }
-        else if (correct)
-        {
-            SetComparisonOptionResult(selectedIndex, true);
-            _feedbackText.text = "Correct";
-            _feedbackText.color = new Color(0.35f, 1f, 0.55f);
-            TryPlayRightHandHaptic(0.38f, 0.07f, force: true);
-        }
-        else
-        {
-            SetComparisonOptionResult(selectedIndex, false);
-            _feedbackText.text = $"Incorrect. Correct answer: {question.correctAnswer}";
-            _feedbackText.color = new Color(1f, 0.42f, 0.35f);
-        }
-        _timerText.text = "";
-        yield return new WaitForSeconds(0.55f);
-        _feedbackText.color = new Color(1f, 0.9f, 0.45f);
-        ClearComparisonOptions();
-    }
-
-    void BuildComparisonOptions(int[] options)
-    {
-        _comparisonTaskRoot = new GameObject("PAXSMComparison_ArithmeticOptions");
-        float[] xPositions = { -1.5f, -0.5f, 0.5f, 1.5f };
-        for (int i = 0; i < options.Length && i < xPositions.Length; i++)
-        {
-            GameObject card = GameObject.CreatePrimitive(PrimitiveType.Cube);
-            card.name = $"ComparisonOption_{i + 1}_{options[i]}";
-            card.transform.SetParent(_comparisonTaskRoot.transform, false);
-            card.transform.position = new Vector3(xPositions[i], 1.34f, 4.12f);
-            card.transform.localScale = new Vector3(0.72f, 0.42f, 0.08f);
-            Renderer renderer = card.GetComponent<Renderer>();
-            if (renderer != null)
-                renderer.sharedMaterial = _normalMaterial;
-
-            GameObject labelObject = new GameObject($"ComparisonOptionLabel_{i + 1}");
-            labelObject.transform.SetParent(_comparisonTaskRoot.transform, false);
-            labelObject.transform.position = new Vector3(xPositions[i], 1.34f, 4.065f);
-            TextMesh label = labelObject.AddComponent<TextMesh>();
-            label.text = options[i].ToString();
-            label.fontSize = 48;
-            label.characterSize = 0.018f;
-            label.anchor = TextAnchor.MiddleCenter;
-            label.alignment = TextAlignment.Center;
-            label.color = Color.white;
-
-            _comparisonOptionObjects.Add(card);
-            _comparisonOptionRenderers.Add(renderer);
-            _comparisonOptionLabels.Add(label);
-        }
-    }
-
-    int ResolveComparisonOption(Ray ray)
-    {
-        int result = -1;
-        float nearest = float.MaxValue;
-        for (int i = 0; i < _comparisonOptionObjects.Count; i++)
-        {
-            Collider collider = _comparisonOptionObjects[i] != null
-                ? _comparisonOptionObjects[i].GetComponent<Collider>()
-                : null;
-            if (collider == null || !collider.Raycast(ray, out RaycastHit hit, selectionMaxDistance))
-                continue;
-            if (hit.distance >= nearest)
-                continue;
-            nearest = hit.distance;
-            result = i;
-        }
-        return result;
-    }
-
-    void UpdateComparisonOptionHover(int hover)
-    {
-        for (int i = 0; i < _comparisonOptionRenderers.Count; i++)
-        {
-            Renderer renderer = _comparisonOptionRenderers[i];
-            if (renderer != null)
-                renderer.sharedMaterial = i == hover ? _questionnaireHoverMaterial : _normalMaterial;
-            if (i < _comparisonOptionLabels.Count && _comparisonOptionLabels[i] != null)
-                _comparisonOptionLabels[i].color = i == hover
-                    ? new Color(0.05f, 0.12f, 0.16f)
-                    : Color.white;
-        }
-    }
-
-    void SetComparisonOptionResult(int index, bool correct)
-    {
-        if (index < 0 || index >= _comparisonOptionRenderers.Count)
-            return;
-        Renderer renderer = _comparisonOptionRenderers[index];
-        if (renderer != null)
-            renderer.sharedMaterial = correct ? _correctMaterial : _wrongMaterial;
-    }
-
-    void ClearComparisonOptions()
-    {
-        if (_comparisonTaskRoot != null)
-            Destroy(_comparisonTaskRoot);
-        _comparisonTaskRoot = null;
-        _comparisonOptionObjects.Clear();
-        _comparisonOptionRenderers.Clear();
-        _comparisonOptionLabels.Clear();
-    }
-
-    bool TryProjectComparisonPointer(Ray ray, out Vector3 point)
-    {
-        Plane wall = new Plane(Vector3.back, new Vector3(0f, 0f, 4.05f));
-        if (wall.Raycast(ray, out float enter))
-        {
-            point = ray.GetPoint(enter);
-            return true;
-        }
-        point = default;
-        return false;
+        _feedbackText.text = "The experimenter may press N to continue when the participant is ready.";
+        yield return WaitForSecondsOrN(Mathf.Max(5f, comparisonRestSeconds));
     }
 
     IEnumerator WaitForComparisonPointClickRelease()
@@ -1571,9 +1324,9 @@ public partial class XRWorkloadProbeSceneController
             return;
 
         string suffix = $"{participantId}_{stamp}_{reason}";
-        string trialsPath = Path.Combine(folder, $"PAXSMComparison_Arithmetic_{suffix}.csv");
+        string formalInputPath = Path.Combine(folder, $"PAXSMComparison_FormalInput_{suffix}.csv");
+        string practicePath = Path.Combine(folder, $"PAXSMComparison_Practice_{suffix}.csv");
         string susPath = Path.Combine(folder, $"PAXSMComparison_SUS_{suffix}.csv");
-        string inputAccuracyPath = Path.Combine(folder, $"PAXSMComparison_InputAccuracy_{suffix}.csv");
         string pointClickPagesPath = Path.Combine(folder, $"PAXSMComparison_PointClickPages_{suffix}.csv");
         string manifestPath = Path.Combine(folder, $"PAXSMComparison_Manifest_{suffix}.csv");
         DirectoryInfo rawDataParent = Directory.GetParent(Path.GetFullPath(folder));
@@ -1582,35 +1335,18 @@ public partial class XRWorkloadProbeSceneController
         string analysisReadyPath = Path.Combine(
             analysisFolder,
             $"PAXSMComparison_AnalysisReady_{suffix}.csv");
-        File.WriteAllText(trialsPath, BuildComparisonTaskCsv(), Encoding.UTF8);
+        File.WriteAllText(formalInputPath, BuildComparisonTargetInputCsv("formal_input_", "formal"), Encoding.UTF8);
+        File.WriteAllText(practicePath, BuildComparisonTargetInputCsv("practice_input_", "practice"), Encoding.UTF8);
         File.WriteAllText(susPath, BuildComparisonSusCsv(), Encoding.UTF8);
-        File.WriteAllText(inputAccuracyPath, BuildComparisonInputAccuracyCsv(), Encoding.UTF8);
         File.WriteAllText(pointClickPagesPath, BuildComparisonPointClickPagesCsv(), Encoding.UTF8);
         File.WriteAllText(manifestPath, BuildComparisonManifestCsv(), Encoding.UTF8);
         File.WriteAllText(analysisReadyPath, BuildComparisonAnalysisReadyCsv(reason), Encoding.UTF8);
-        savedPaths.Add(trialsPath);
+        savedPaths.Add(formalInputPath);
+        savedPaths.Add(practicePath);
         savedPaths.Add(susPath);
-        savedPaths.Add(inputAccuracyPath);
         savedPaths.Add(pointClickPagesPath);
         savedPaths.Add(manifestPath);
         savedPaths.Add(analysisReadyPath);
-    }
-
-    string BuildComparisonTaskCsv()
-    {
-        var sb = new StringBuilder();
-        sb.AppendLine("participantId,sessionNumber,conditionLabel,presentationOrder,orderCode,method,taskDemand,form,trialIndex,problem,options,correctAnswer,selectedAnswer,selectedIndex,isCorrect,timeout,decisionRt,pointerPath,pointerPeakSpeed,hoverChangeCount");
-        for (int i = 0; i < _comparisonTaskRecords.Count; i++)
-        {
-            ComparisonTaskRecord r = _comparisonTaskRecords[i];
-            sb.AppendLine(string.Join(",",
-                Csv(participantId), I(sessionNumber), Csv(EffectiveConditionLabel()), I(r.presentationOrder),
-                Csv(r.orderCode), Csv(r.method), Csv(r.taskDemand), Csv(r.form), I(r.trialIndex),
-                Csv(r.problem), Csv(r.options), I(r.correctAnswer), I(r.selectedAnswer), I(r.selectedIndex),
-                B(r.isCorrect), B(r.timeout), F(r.decisionRt), F(r.pointerPath), F(r.pointerPeakSpeed),
-                I(r.hoverChangeCount)));
-        }
-        return sb.ToString();
     }
 
     string BuildComparisonPointClickPagesCsv()
@@ -1670,33 +1406,45 @@ public partial class XRWorkloadProbeSceneController
         return sb.ToString();
     }
 
-    string BuildComparisonInputAccuracyCsv()
+    string BuildComparisonTargetInputCsv(string blockPrefix, string trialType)
     {
         var sb = new StringBuilder();
-        sb.AppendLine("participantId,sessionNumber,conditionLabel,method,itemIndex,itemId,targetValue,selectedValue,absoluteError,exactMatch,responseMode,answerRt,firstInteractionRt,confirmAttempts,confirmCancels");
+        sb.AppendLine(
+            "participantId,sessionNumber,conditionLabel,presentationOrder,sequenceCode,method,targetOrderForm," +
+            "trialType,itemIndex,itemId,referenceValue,targetValue,targetDistanceFromCenter,selectedValue," +
+            "completed,absoluteError,exactMatch,responseMode,completionTime,firstInteractionRt," +
+            "correctionOccurred,correctionCount,correctionDefinition,confirmAttempts,confirmCancels");
         for (int i = 0; i < _questionnaireRecords.Count; i++)
         {
             QuestionnaireRecord record = _questionnaireRecords[i];
             if (record == null ||
-                !record.blockId.StartsWith("input_check_", StringComparison.OrdinalIgnoreCase) ||
-                !TryParseInputCheckTarget(record.itemId, out int target))
+                !record.blockId.StartsWith(blockPrefix, StringComparison.OrdinalIgnoreCase) ||
+                !TryParseComparisonTarget(record.itemId, out int target))
                 continue;
 
-            string method = record.blockId.Substring("input_check_".Length);
+            string method = record.blockId.Substring(blockPrefix.Length);
+            bool completed = record.selectedScore > 0;
             int absoluteError = record.selectedScore > 0
                 ? Mathf.Abs(record.selectedScore - target)
                 : -1;
+            int correctionCount = ComparisonCorrectionCount(record, method);
             sb.AppendLine(string.Join(",",
-                Csv(participantId), I(sessionNumber), Csv(EffectiveConditionLabel()), Csv(method),
-                I(record.itemIndex), Csv(record.itemId), I(target), I(record.selectedScore), I(absoluteError),
-                B(record.selectedScore == target), Csv(record.responseMode), F(record.answerRt),
-                F(record.answerFirstInteractionRt), I(record.answerConfirmAttemptCount),
-                I(record.answerConfirmCancelCount)));
+                Csv(participantId), I(sessionNumber), Csv(EffectiveConditionLabel()),
+                I(FirstComparisonPresentationOrder(method)), Csv(_comparisonSequenceCode), Csv(method),
+                Csv(string.Equals(trialType, "formal", StringComparison.OrdinalIgnoreCase)
+                    ? FirstComparisonTaskForm(method)
+                    : "practice"),
+                Csv(trialType), I(record.itemIndex), Csv(record.itemId), I(ComparisonScaleMidpoint), I(target),
+                I(Mathf.Abs(target - ComparisonScaleMidpoint)), I(record.selectedScore), B(completed),
+                I(absoluteError), B(completed && record.selectedScore == target), Csv(record.responseMode),
+                F(record.answerRt), F(record.answerFirstInteractionRt), B(correctionCount > 0),
+                I(correctionCount), Csv(ComparisonCorrectionDefinition(method)),
+                I(record.answerConfirmAttemptCount), I(record.answerConfirmCancelCount)));
         }
         return sb.ToString();
     }
 
-    bool TryParseInputCheckTarget(string itemId, out int target)
+    bool TryParseComparisonTarget(string itemId, out int target)
     {
         target = -1;
         if (string.IsNullOrWhiteSpace(itemId))
@@ -1706,18 +1454,40 @@ public partial class XRWorkloadProbeSceneController
                int.TryParse(itemId.Substring(separator + 1), out target);
     }
 
+    int ComparisonCorrectionCount(QuestionnaireRecord record, string method)
+    {
+        if (record == null)
+            return 0;
+        return string.Equals(method, "point_click", StringComparison.OrdinalIgnoreCase)
+            ? Mathf.Max(0, record.answerConfirmAttemptCount - 1)
+            : Mathf.Max(0, record.answerReverseCount);
+    }
+
+    string ComparisonCorrectionDefinition(string method)
+    {
+        return string.Equals(method, "point_click", StringComparison.OrdinalIgnoreCase)
+            ? "selection_change_after_first_selection"
+            : "knob_direction_reversal_before_confirmation";
+    }
+
     string BuildComparisonManifestCsv()
     {
         var sb = new StringBuilder();
-        sb.AppendLine("designSchemaVersion,participantId,sessionNumber,conditionLabel,studyDesign,independentVariable,methodLevels,sequenceCode,taskDemand,taskForms,inputCheckItemsPerMethod,arithmeticTrialsPerMethod,trialTimeoutSec,inputCheckBank,workloadBank,susBank,confidenceAfterWorkload,pointClickLayout,pointClickItemsPerPage,pointClickRadioDiameterM,pointClickConfirmation,paxsmConfirmation");
+        sb.AppendLine(
+            "designSchemaVersion,participantId,sessionNumber,conditionLabel,studyDesign,independentVariable," +
+            "methodLevels,sequenceCode,targetOrderForms,practiceItemsPerMethod,practiceIncludedInPrimaryAnalysis," +
+            "formalItemsPerMethod,scaleReferenceValue,scaleMinimum,scaleMaximum,practiceBank,formalBankA,formalBankB," +
+            "workloadBank,susBank,restSeconds,confidenceAfterWorkload,pointClickLayout,pointClickItemsPerPage," +
+            "pointClickRadioDiameterM,pointClickConfirmation,paxsmConfirmation");
         sb.AppendLine(string.Join(",",
-            Csv("CAREXR_PAXSMComparison_Design_v3"), Csv(participantId), I(sessionNumber),
+            Csv("CAREXR_PAXSMComparison_Design_v4"), Csv(participantId), I(sessionNumber),
             Csv(EffectiveConditionLabel()), Csv("within_subject_single_factor"),
             Csv("questionnaire_interaction_method"), Csv("paxsm|point_click"), Csv(_comparisonSequenceCode),
-            Csv(ComparisonTaskDemandKey), Csv("A|B"), I(ComparisonInputCheckItemCount),
-            I(Mathf.Clamp(comparisonArithmeticTrialsPerMethod, 2, 4)), F(comparisonTrialTimeoutSeconds),
-            Csv(comparisonInputCheckBankResourcesPath), Csv(comparisonWorkloadBankResourcesPath),
-            Csv(comparisonSusBankResourcesPath),
+            Csv("A|B"), I(ComparisonPracticeItemCount), B(false),
+            I(Mathf.Clamp(comparisonFormalTrialsPerMethod, 8, 12)), I(ComparisonScaleMidpoint), I(1), I(21),
+            Csv(comparisonPracticeBankResourcesPath), Csv(comparisonFormalBankAResourcesPath),
+            Csv(comparisonFormalBankBResourcesPath), Csv(comparisonWorkloadBankResourcesPath),
+            Csv(comparisonSusBankResourcesPath), F(Mathf.Max(5f, comparisonRestSeconds)),
             B(comparisonCollectConfidence), Csv("classic_xr_radio_panel"),
             I(Mathf.Clamp(comparisonPointClickItemsPerPage, 1, 3)), F(comparisonPointClickRadioDiameterMeters),
             Csv("radio_dot_selection_then_page_navigation"),
@@ -1730,12 +1500,14 @@ public partial class XRWorkloadProbeSceneController
         var headers = new List<string>
         {
             "analysisSchemaVersion", "participantId", "sessionNumber", "conditionLabel", "runId",
-            "sequenceCode", "method", "methodPresentationOrder", "taskForm", "taskDemand",
+            "sequenceCode", "method", "methodPresentationOrder", "targetOrderForm",
             "methodComplete", "qualityFlags", "exportReason", "generatedUtc",
-            "inputResponseMode", "inputItems", "inputExactMatches", "inputAccuracy",
-            "inputMeanAbsoluteError", "inputMaxAbsoluteError", "inputMeanAnswerRt", "inputMedianAnswerRt",
-            "inputValidFirstInteractionItems", "inputMeanFirstInteractionRt", "inputConfirmAttempts",
-            "inputConfirmCancels", "inputIncompleteItems",
+            "formalResponseMode", "formalItems", "formalCompletedItems", "formalCompletionRate",
+            "formalExactMatches", "formalAccuracy", "formalMeanAbsoluteError", "formalMaxAbsoluteError",
+            "formalMeanCompletionTime", "formalMedianCompletionTime", "formalSdCompletionTime",
+            "formalTotalCompletionTime", "formalValidFirstInteractionItems", "formalMeanFirstInteractionRt",
+            "formalCorrectedTrials", "formalCorrectionRate", "formalCorrectionEvents",
+            "formalConfirmAttempts", "formalConfirmCancels", "formalIncompleteItems",
             "susAnsweredItems", "susScore", "susComplete", "susTotalRt",
             "sus01", "sus02", "sus03", "sus04", "sus05", "sus06", "sus07", "sus08", "sus09", "sus10"
         };
@@ -1751,7 +1523,7 @@ public partial class XRWorkloadProbeSceneController
             string qualityFlags = BuildComparisonMethodQualityFlags(method);
             var cells = new List<string>
             {
-                Csv("CAREXR_PAXSMComparison_AnalysisReady_v3"),
+                Csv("CAREXR_PAXSMComparison_AnalysisReady_v4"),
                 Csv(participantId),
                 I(sessionNumber),
                 Csv(EffectiveConditionLabel()),
@@ -1760,14 +1532,13 @@ public partial class XRWorkloadProbeSceneController
                 Csv(method),
                 OptionalInt(FirstComparisonPresentationOrder(method)),
                 Csv(FirstComparisonTaskForm(method)),
-                Csv(ComparisonTaskDemandKey),
                 B(string.Equals(qualityFlags, "none", StringComparison.Ordinal)),
                 Csv(qualityFlags),
                 Csv(exportReason),
                 Csv(generatedUtc)
             };
 
-            AddComparisonInputAnalysisCells(cells, method);
+            AddComparisonFormalInputAnalysisCells(cells, method);
             AddComparisonSusAnalysisCells(cells, method);
             AddComparisonMethodAnalysisCells(cells, method);
             sb.AppendLine(string.Join(",", cells));
@@ -1779,27 +1550,25 @@ public partial class XRWorkloadProbeSceneController
     {
         headers.AddRange(new[]
         {
-            "taskTrials", "taskCorrect", "taskAccuracy", "taskTimeouts", "taskMeanDecisionRt",
-            "taskMedianDecisionRt", "taskSdDecisionRt", "taskTotalDecisionRt",
-            "taskMeanPointerPath", "taskMeanPointerPeakSpeed", "taskMeanHoverChanges",
             "nasaResponseMode", "nasaItems", "nasaComplete",
             "nasaMental", "nasaPhysical", "nasaTemporal", "nasaPerformance",
-            "nasaEffort", "nasaFrustration", "nasaRawMean",
-            "confidenceComplete", "confidenceMean", "confidenceMental", "confidencePhysical",
-            "confidenceTemporal", "confidencePerformance", "confidenceEffort", "confidenceFrustration",
+            "nasaPerformanceWorkloadCoded", "nasaEffort", "nasaFrustration", "nasaRawMean",
             "questionnaireMeanReadRt", "questionnaireMeanAnswerRt",
-            "questionnaireMeanAnswerDecisionRt", "questionnaireMeanConfidenceRt",
-            "questionnaireTotalRt", "answerConfirmAttempts", "answerConfirmCancels"
+            "questionnaireMeanAnswerDecisionRt", "questionnaireTotalRt",
+            "answerConfirmAttempts", "answerConfirmCancels"
         });
     }
 
-    void AddComparisonInputAnalysisCells(List<string> cells, string method)
+    void AddComparisonFormalInputAnalysisCells(List<string> cells, string method)
     {
-        string blockId = "input_check_" + method;
+        string blockId = "formal_input_" + method;
         string responseMode = "";
         int items = 0;
+        int completed = 0;
         int exact = 0;
         int incomplete = 0;
+        int correctedTrials = 0;
+        int correctionEvents = 0;
         int confirmAttempts = 0;
         int confirmCancels = 0;
         float absoluteErrorSum = 0f;
@@ -1815,34 +1584,44 @@ public partial class XRWorkloadProbeSceneController
             items++;
             if (string.IsNullOrWhiteSpace(responseMode))
                 responseMode = record.responseMode;
-            if (!TryParseInputCheckTarget(record.itemId, out int target) || record.selectedScore <= 0)
+            if (!TryParseComparisonTarget(record.itemId, out int target) || record.selectedScore <= 0)
             {
                 incomplete++;
             }
             else
             {
+                completed++;
                 int error = Mathf.Abs(record.selectedScore - target);
                 absoluteErrorSum += error;
                 maxAbsoluteError = Mathf.Max(maxAbsoluteError, error);
                 if (error == 0) exact++;
             }
+            int corrections = ComparisonCorrectionCount(record, method);
+            correctionEvents += corrections;
+            if (corrections > 0) correctedTrials++;
             if (record.answerRt >= 0f) answerRts.Add(record.answerRt);
             if (record.answerFirstInteractionRt >= 0f) firstInteractionRts.Add(record.answerFirstInteractionRt);
             confirmAttempts += record.answerConfirmAttemptCount;
             confirmCancels += record.answerConfirmCancelCount;
         }
 
-        int validItems = items - incomplete;
         cells.Add(Csv(responseMode));
         cells.Add(I(items));
+        cells.Add(I(completed));
+        cells.Add(OptionalRatio(completed, items));
         cells.Add(I(exact));
-        cells.Add(OptionalRatio(exact, validItems));
-        cells.Add(validItems > 0 ? F(absoluteErrorSum / validItems) : "");
-        cells.Add(validItems > 0 ? I(maxAbsoluteError) : "");
+        cells.Add(OptionalRatio(exact, completed));
+        cells.Add(completed > 0 ? F(absoluteErrorSum / completed) : "");
+        cells.Add(completed > 0 ? I(maxAbsoluteError) : "");
         cells.Add(OptionalMean(answerRts));
         cells.Add(OptionalMedian(answerRts));
+        cells.Add(OptionalSampleSd(answerRts));
+        cells.Add(answerRts.Count > 0 ? F(SumNonNegative(answerRts)) : "");
         cells.Add(I(firstInteractionRts.Count));
         cells.Add(OptionalMean(firstInteractionRts));
+        cells.Add(I(correctedTrials));
+        cells.Add(OptionalRatio(correctedTrials, completed));
+        cells.Add(I(correctionEvents));
         cells.Add(I(confirmAttempts));
         cells.Add(I(confirmCancels));
         cells.Add(I(incomplete));
@@ -1889,53 +1668,15 @@ public partial class XRWorkloadProbeSceneController
 
     void AddComparisonMethodAnalysisCells(List<string> cells, string method)
     {
-        int taskTrials = 0;
-        int taskCorrect = 0;
-        int taskTimeouts = 0;
-        float taskTotalRt = 0f;
-        var taskRts = new List<float>();
-        var pointerPaths = new List<float>();
-        var pointerPeakSpeeds = new List<float>();
-        float hoverChanges = 0f;
-
-        for (int i = 0; i < _comparisonTaskRecords.Count; i++)
-        {
-            ComparisonTaskRecord record = _comparisonTaskRecords[i];
-            if (!string.Equals(record.method, method, StringComparison.OrdinalIgnoreCase))
-                continue;
-            taskTrials++;
-            if (record.isCorrect) taskCorrect++;
-            if (record.timeout) taskTimeouts++;
-            taskTotalRt += record.decisionRt;
-            taskRts.Add(record.decisionRt);
-            pointerPaths.Add(record.pointerPath);
-            pointerPeakSpeeds.Add(record.pointerPeakSpeed);
-            hoverChanges += record.hoverChangeCount;
-        }
-
-        cells.Add(I(taskTrials));
-        cells.Add(I(taskCorrect));
-        cells.Add(OptionalRatio(taskCorrect, taskTrials));
-        cells.Add(I(taskTimeouts));
-        cells.Add(OptionalMean(taskRts));
-        cells.Add(OptionalMedian(taskRts));
-        cells.Add(OptionalSampleSd(taskRts));
-        cells.Add(taskTrials > 0 ? F(taskTotalRt) : "");
-        cells.Add(OptionalMean(pointerPaths));
-        cells.Add(OptionalMean(pointerPeakSpeeds));
-        cells.Add(taskTrials > 0 ? F(hoverChanges / taskTrials) : "");
-
         string blockId = $"comparison_{method}";
         QuestionnaireRecord[] nasa = new QuestionnaireRecord[6];
         string responseMode = "";
         int nasaItems = 0;
-        int confidenceItems = 0;
         int answerConfirmAttempts = 0;
         int answerConfirmCancels = 0;
         var readRts = new List<float>();
         var answerRts = new List<float>();
         var answerDecisionRts = new List<float>();
-        var confidenceRts = new List<float>();
 
         for (int i = 0; i < _questionnaireRecords.Count; i++)
         {
@@ -1947,12 +1688,10 @@ public partial class XRWorkloadProbeSceneController
                 continue;
             nasa[dimensionIndex] = record;
             nasaItems++;
-            if (record.confidence >= 1 && record.confidence <= 5) confidenceItems++;
             if (string.IsNullOrWhiteSpace(responseMode)) responseMode = record.responseMode;
             if (record.readRt >= 0f) readRts.Add(record.readRt);
             if (record.answerRt >= 0f) answerRts.Add(record.answerRt);
             if (record.answerDecisionRt >= 0f) answerDecisionRts.Add(record.answerDecisionRt);
-            if (record.confidenceRt > 0f) confidenceRts.Add(record.confidenceRt);
             answerConfirmAttempts += record.answerConfirmAttemptCount;
             answerConfirmCancels += record.answerConfirmCancelCount;
         }
@@ -1965,35 +1704,28 @@ public partial class XRWorkloadProbeSceneController
         for (int i = 0; i < nasa.Length; i++)
         {
             bool valid = nasa[i] != null && nasa[i].selectedScore >= 1;
-            cells.Add(valid ? I(nasa[i].selectedScore) : "");
             if (valid)
             {
-                nasaSum += nasa[i].selectedScore;
+                nasaSum += i == 3
+                    ? nasa[i].scale + 1 - nasa[i].selectedScore
+                    : nasa[i].selectedScore;
                 validNasa++;
             }
         }
+        for (int i = 0; i < 4; i++)
+            cells.Add(nasa[i] != null && nasa[i].selectedScore >= 1 ? I(nasa[i].selectedScore) : "");
+        bool performanceValid = nasa[3] != null && nasa[3].selectedScore >= 1;
+        cells.Add(performanceValid ? I(nasa[3].scale + 1 - nasa[3].selectedScore) : "");
+        for (int i = 4; i < nasa.Length; i++)
+            cells.Add(nasa[i] != null && nasa[i].selectedScore >= 1 ? I(nasa[i].selectedScore) : "");
         cells.Add(validNasa > 0 ? F(nasaSum / validNasa) : "");
-        cells.Add(B(!comparisonCollectConfidence || confidenceItems == 6));
-        float confidenceSum = 0f;
-        for (int i = 0; i < nasa.Length; i++)
-            if (nasa[i] != null && nasa[i].confidence >= 1 && nasa[i].confidence <= 5)
-                confidenceSum += nasa[i].confidence;
-        cells.Add(confidenceItems > 0 ? F(confidenceSum / confidenceItems) : "");
-        for (int i = 0; i < nasa.Length; i++)
-            cells.Add(nasa[i] != null && nasa[i].confidence >= 1 && nasa[i].confidence <= 5
-                ? I(nasa[i].confidence)
-                : "");
         cells.Add(OptionalMean(readRts));
         cells.Add(OptionalMean(answerRts));
         cells.Add(OptionalMean(answerDecisionRts));
-        cells.Add(OptionalMean(confidenceRts));
-        float questionnaireTotalRt = SumNonNegative(readRts) + SumNonNegative(answerRts) + SumNonNegative(confidenceRts);
+        float questionnaireTotalRt = SumNonNegative(readRts) + SumNonNegative(answerRts);
         float answerPageRt = ClassicPointClickStageTotalRt(blockId, "Answer");
         if (answerPageRt >= 0f)
-        {
-            float confidencePageRt = ClassicPointClickStageTotalRt(blockId, "Confidence");
-            questionnaireTotalRt = answerPageRt + Mathf.Max(0f, confidencePageRt);
-        }
+            questionnaireTotalRt = answerPageRt;
         cells.Add(nasaItems > 0 ? F(questionnaireTotalRt) : "");
         cells.Add(I(answerConfirmAttempts));
         cells.Add(I(answerConfirmCancels));
@@ -2002,18 +1734,15 @@ public partial class XRWorkloadProbeSceneController
     string BuildComparisonMethodQualityFlags(string method)
     {
         var flags = new List<string>();
-        int inputItems = CountComparisonQuestionnaireItems("input_check_" + method, false, out _);
+        int practiceItems = CountComparisonQuestionnaireItems("practice_input_" + method, false, out _);
+        int formalItems = CountComparisonQuestionnaireItems("formal_input_" + method, false, out _);
         int susItems = CountComparisonQuestionnaireItems("sus_" + method, false, out _);
-        if (inputItems != ComparisonInputCheckItemCount)
-            flags.Add($"input_items_{inputItems}_of_{ComparisonInputCheckItemCount}");
+        if (practiceItems < ComparisonPracticeItemCount)
+            flags.Add($"practice_items_{practiceItems}_minimum_{ComparisonPracticeItemCount}");
+        int expectedFormalItems = Mathf.Clamp(comparisonFormalTrialsPerMethod, 8, 12);
+        if (formalItems != expectedFormalItems)
+            flags.Add($"formal_items_{formalItems}_of_{expectedFormalItems}");
         if (susItems != 10) flags.Add($"sus_items_{susItems}_of_10");
-        int expectedTrials = Mathf.Clamp(comparisonArithmeticTrialsPerMethod, 2, 4);
-        int taskItems = 0;
-        for (int i = 0; i < _comparisonTaskRecords.Count; i++)
-            if (string.Equals(_comparisonTaskRecords[i].method, method, StringComparison.OrdinalIgnoreCase))
-                taskItems++;
-        if (taskItems != expectedTrials)
-            flags.Add($"task_items_{taskItems}_of_{expectedTrials}");
 
         int nasaItems = CountComparisonQuestionnaireItems($"comparison_{method}", true, out int confidenceItems);
         if (nasaItems != 6) flags.Add($"nasa_items_{nasaItems}_of_6");
@@ -2041,27 +1770,22 @@ public partial class XRWorkloadProbeSceneController
 
     int FirstComparisonPresentationOrder(string method)
     {
-        int result = int.MaxValue;
-        for (int i = 0; i < _comparisonTaskRecords.Count; i++)
-            if (string.Equals(_comparisonTaskRecords[i].method, method, StringComparison.OrdinalIgnoreCase))
-                result = Mathf.Min(result, _comparisonTaskRecords[i].presentationOrder);
-        return result == int.MaxValue ? -1 : result;
+        return _comparisonPresentationOrderByMethod.TryGetValue(method, out int order) ? order : -1;
     }
 
     string FirstComparisonTaskForm(string method)
     {
-        int firstOrder = int.MaxValue;
-        string form = "";
-        for (int i = 0; i < _comparisonTaskRecords.Count; i++)
-        {
-            ComparisonTaskRecord record = _comparisonTaskRecords[i];
-            if (!string.Equals(record.method, method, StringComparison.OrdinalIgnoreCase) ||
-                record.presentationOrder >= firstOrder)
-                continue;
-            firstOrder = record.presentationOrder;
-            form = record.form;
-        }
-        return form;
+        return _comparisonTargetFormByMethod.TryGetValue(method, out string form) ? form : "";
+    }
+
+    int CountComparisonFormalRecords()
+    {
+        int count = 0;
+        for (int i = 0; i < _questionnaireRecords.Count; i++)
+            if (_questionnaireRecords[i] != null &&
+                _questionnaireRecords[i].blockId.StartsWith("formal_input_", StringComparison.OrdinalIgnoreCase))
+                count++;
+        return count;
     }
 
     int ComparisonNasaDimensionIndex(string itemId)

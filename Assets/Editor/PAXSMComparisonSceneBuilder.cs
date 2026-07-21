@@ -38,6 +38,10 @@ public static class PAXSMComparisonSceneBuilder
             throw new InvalidOperationException("Comparison scene has no PAXSMComparisonSceneController.");
         if (!controller.questionnaireComparisonMode || !controller.questionnaireOnlyMode)
             throw new InvalidOperationException("Comparison controller is not in questionnaire comparison mode.");
+        if (controller.comparisonFormalTrialsPerMethod < 8 || controller.comparisonFormalTrialsPerMethod > 12)
+            throw new InvalidOperationException("Formal target trials must remain between 8 and 12 per method.");
+        if (controller.comparisonCollectConfidence || controller.collectConfidenceAfterEachItem)
+            throw new InvalidOperationException("Study 1 should not collect the removed confidence stage.");
         if (controller.tutorialRightControllerPrefab == null)
             throw new InvalidOperationException("Comparison scene lost the controller tutorial prefab reference.");
         if (GameObject.Find("XR Origin (XR Rig)") == null)
@@ -50,11 +54,17 @@ public static class PAXSMComparisonSceneBuilder
         if (workload == null || string.IsNullOrWhiteSpace(workload.text) ||
             !workload.text.Contains("nasa_tlx_frustration"))
             throw new InvalidOperationException("The locked six-item NASA-TLX comparison bank is unavailable.");
-        TextAsset inputCheck = Resources.Load<TextAsset>("QuestionBanks/Comparison_Input_Check_21");
-        if (inputCheck == null || string.IsNullOrWhiteSpace(inputCheck.text) ||
-            !inputCheck.text.Contains("input_check_target_02") ||
-            !inputCheck.text.Contains("input_check_target_20"))
-            throw new InvalidOperationException("The eight-item comparison input check is unavailable.");
+        TextAsset practice = Resources.Load<TextAsset>("QuestionBanks/Comparison_Practice_Targets_21");
+        if (practice == null || string.IsNullOrWhiteSpace(practice.text) ||
+            !practice.text.Contains("practice_target_05") ||
+            !practice.text.Contains("practice_target_17"))
+            throw new InvalidOperationException("The two-item comparison practice bank is unavailable.");
+        TextAsset formalA = Resources.Load<TextAsset>("QuestionBanks/Comparison_Formal_Targets_A_21");
+        TextAsset formalB = Resources.Load<TextAsset>("QuestionBanks/Comparison_Formal_Targets_B_21");
+        if (formalA == null || formalB == null ||
+            !formalA.text.Contains("formal_target_01") || !formalA.text.Contains("formal_target_21") ||
+            !formalB.text.Contains("formal_target_01") || !formalB.text.Contains("formal_target_21"))
+            throw new InvalidOperationException("The counterbalanced 12-item formal target banks are unavailable.");
 
         bool inBuildSettings = EditorBuildSettings.scenes.Any(entry =>
             entry.enabled && string.Equals(entry.path, TargetScenePath, StringComparison.OrdinalIgnoreCase));
@@ -105,15 +115,17 @@ public static class PAXSMComparisonSceneBuilder
         controller.startAutomatically = true;
         controller.writeCsvOnQuit = true;
         controller.collectQuestionnaireBetweenBlocks = true;
-        controller.collectConfidenceAfterEachItem = true;
-        controller.comparisonCollectConfidence = true;
-        controller.comparisonArithmeticTrialsPerMethod = 4;
-        controller.comparisonTrialTimeoutSeconds = 25f;
+        controller.collectConfidenceAfterEachItem = false;
+        controller.comparisonCollectConfidence = false;
+        controller.comparisonFormalTrialsPerMethod = 12;
+        controller.comparisonRestSeconds = 20f;
         controller.comparisonPointClickItemsPerPage = 1;
         controller.comparisonPointClickRadioDiameterMeters = 0.055f;
         controller.comparisonWorkloadBankResourcesPath = "QuestionBanks/NASA_TLX_21_Comparison";
         controller.comparisonSusBankResourcesPath = "QuestionBanks/SUS";
-        controller.comparisonInputCheckBankResourcesPath = "QuestionBanks/Comparison_Input_Check_21";
+        controller.comparisonPracticeBankResourcesPath = "QuestionBanks/Comparison_Practice_Targets_21";
+        controller.comparisonFormalBankAResourcesPath = "QuestionBanks/Comparison_Formal_Targets_A_21";
+        controller.comparisonFormalBankBResourcesPath = "QuestionBanks/Comparison_Formal_Targets_B_21";
         controller.questionnaireBankResourcesPath = "QuestionBanks/NASA_TLX_21_Comparison";
         controller.questionnaireScale = 21;
         controller.questionnaireConfidenceScale = 5;

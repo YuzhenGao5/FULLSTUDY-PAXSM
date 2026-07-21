@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "scale": 21,
+  "default_mode": "slider",
+  "labels": ["1", "6", "11", "16", "21"],
+  "items": [
+    { "id": "practice_target_05", "stem": "Practice: select value 5." },
+    { "id": "practice_target_17", "stem": "Practice: select value 17." }
+  ]
+}

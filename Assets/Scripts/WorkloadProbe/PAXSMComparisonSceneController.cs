@@ -8,8 +8,8 @@ public sealed class PAXSMComparisonSceneController : XRQuestionnaireReadSceneCon
         questionnaireOnlyMode = true;
         requireReadAcknowledgement = true;
         collectQuestionnaireBetweenBlocks = true;
-        collectConfidenceAfterEachItem = true;
-        comparisonCollectConfidence = true;
+        collectConfidenceAfterEachItem = false;
+        comparisonCollectConfidence = false;
         recordQuestionnairePersonalSpeed = true;
         questionnaireInputMethod = QuestionnaireInputMethod.PaxsmKnob;
 
@@ -18,8 +18,11 @@ public sealed class PAXSMComparisonSceneController : XRQuestionnaireReadSceneCon
         outputFolderName = "PAXSMComparison_Data";
         comparisonWorkloadBankResourcesPath = "QuestionBanks/NASA_TLX_21_Comparison";
         comparisonSusBankResourcesPath = "QuestionBanks/SUS";
-        comparisonInputCheckBankResourcesPath = "QuestionBanks/Comparison_Input_Check_21";
-        comparisonArithmeticTrialsPerMethod = 4;
+        comparisonPracticeBankResourcesPath = "QuestionBanks/Comparison_Practice_Targets_21";
+        comparisonFormalBankAResourcesPath = "QuestionBanks/Comparison_Formal_Targets_A_21";
+        comparisonFormalBankBResourcesPath = "QuestionBanks/Comparison_Formal_Targets_B_21";
+        comparisonFormalTrialsPerMethod = 12;
+        comparisonRestSeconds = 20f;
 
         base.Awake();
     }

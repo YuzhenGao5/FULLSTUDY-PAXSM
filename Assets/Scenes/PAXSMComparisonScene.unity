@@ -167,10 +167,12 @@ MonoBehaviour:
   questionnaireComparisonMode: 1
   comparisonWorkloadBankResourcesPath: QuestionBanks/NASA_TLX_21_Comparison
   comparisonSusBankResourcesPath: QuestionBanks/SUS
-  comparisonInputCheckBankResourcesPath: QuestionBanks/Comparison_Input_Check_21
-  comparisonArithmeticTrialsPerBlock: 4
-  comparisonTrialTimeoutSeconds: 25
-  comparisonCollectConfidence: 1
+  comparisonPracticeBankResourcesPath: QuestionBanks/Comparison_Practice_Targets_21
+  comparisonFormalBankAResourcesPath: QuestionBanks/Comparison_Formal_Targets_A_21
+  comparisonFormalBankBResourcesPath: QuestionBanks/Comparison_Formal_Targets_B_21
+  comparisonFormalTrialsPerMethod: 12
+  comparisonRestSeconds: 20
+  comparisonCollectConfidence: 0
   comparisonPointClickItemsPerPage: 1
   comparisonPointClickRadioDiameterMeters: 0.055
   questionnaireOnlyMode: 1
@@ -200,7 +202,7 @@ MonoBehaviour:
   questionnaireGrabRadius: 0.14
   questionnaireScale: 21
   questionnaireConfidenceScale: 5
-  collectConfidenceAfterEachItem: 1
+  collectConfidenceAfterEachItem: 0
   featureAlgorithmVersion: PAXSM_QuestionnaireTrace_v2.0
   questionnairePauseThresholdSec: 0.2
   questionnaireStillThresholdSec: 0.25

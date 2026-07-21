@@ -27,12 +27,6 @@ public partial class XRWorkloadProbeSceneController
     bool _syntheticProbeTimeout;
     bool _syntheticProbeWrong;
 
-    string _syntheticComparisonTrialKey = "";
-    float _syntheticComparisonTrialStart;
-    float _syntheticComparisonTrialDuration;
-    int _syntheticComparisonTargetIndex;
-    bool _syntheticComparisonClickIssued;
-
     string _syntheticReadKey = "";
     float _syntheticReadStart;
     float _syntheticReadDelay;
@@ -161,80 +155,6 @@ public partial class XRWorkloadProbeSceneController
                     : 1.15f + 0.10f * (trialIndex % 3);
                 break;
         }
-    }
-
-    void BeginSyntheticComparisonTrial(
-        ComparisonBlockSpec block,
-        int trialIndex,
-        ComparisonMathQuestion question)
-    {
-        if (!SyntheticParticipantActive)
-            return;
-
-        _syntheticComparisonTrialKey = $"{_blockIndex}:{trialIndex}:{question.problem}";
-        _syntheticComparisonTrialStart = Time.realtimeSinceStartup;
-        _syntheticComparisonTrialDuration = 1.1f + 0.12f * (trialIndex % 3);
-        if (_blockIndex == 0)
-            _syntheticComparisonTrialDuration += 0.35f;
-
-        int correctIndex = Array.IndexOf(question.options, question.correctAnswer);
-        bool plannedError = trialIndex == 3;
-        _syntheticComparisonTargetIndex = plannedError
-            ? (correctIndex + 1) % Mathf.Max(1, question.options.Length)
-            : correctIndex;
-        _syntheticComparisonClickIssued = false;
-    }
-
-    bool GetSyntheticComparisonPointClick(
-        out Ray ray,
-        out Vector3 origin,
-        out bool pressed)
-    {
-        origin = new Vector3(0.22f, 1.12f, 0.38f);
-        pressed = false;
-        if (!SyntheticParticipantActive || string.IsNullOrEmpty(_syntheticComparisonTrialKey))
-        {
-            ray = new Ray(origin, Vector3.forward);
-            return false;
-        }
-
-        float elapsed = Time.realtimeSinceStartup - _syntheticComparisonTrialStart;
-        float progress = Mathf.Clamp01(elapsed / Mathf.Max(0.1f, _syntheticComparisonTrialDuration));
-        int optionCount = Mathf.Max(1, _comparisonOptionObjects.Count);
-        int hoverIndex = progress < 0.3f
-            ? (_syntheticComparisonTargetIndex + 1) % optionCount
-            : (progress < 0.62f
-                ? (_syntheticComparisonTargetIndex + optionCount - 1) % optionCount
-                : _syntheticComparisonTargetIndex);
-
-        Vector3 movingOrigin = origin + new Vector3(
-            0.04f * Mathf.Sin(progress * Mathf.PI * 4f),
-            0.025f * Mathf.Sin(progress * Mathf.PI * 3f),
-            0f);
-        Vector3 aim = movingOrigin + Vector3.forward * 3f;
-        if (hoverIndex >= 0 && hoverIndex < _comparisonOptionObjects.Count &&
-            _comparisonOptionObjects[hoverIndex] != null)
-        {
-            aim = _comparisonOptionObjects[hoverIndex].GetComponent<Collider>()?.bounds.center ??
-                  _comparisonOptionObjects[hoverIndex].transform.position;
-        }
-
-        Vector3 direction = (aim - movingOrigin).normalized;
-        ray = new Ray(movingOrigin, direction);
-        origin = movingOrigin;
-        SetSyntheticTrackedPose(
-            new Vector3(0f, 1.62f, 0f),
-            new Vector3(-0.24f, 1.08f, 0.36f),
-            movingOrigin,
-            direction,
-            progress);
-
-        if (!_syntheticComparisonClickIssued && elapsed >= _syntheticComparisonTrialDuration)
-        {
-            pressed = true;
-            _syntheticComparisonClickIssued = true;
-        }
-        return true;
     }
 
     void BeginSyntheticQuestionnaireRead(QuestionnaireRecord record)
@@ -426,11 +346,13 @@ public partial class XRWorkloadProbeSceneController
 
         string block = (record.blockId ?? "").ToLowerInvariant();
         string item = (record.itemId ?? "").ToLowerInvariant();
-        if (block.StartsWith("input_check_", StringComparison.Ordinal))
+        if (block.StartsWith("practice_input_", StringComparison.Ordinal) ||
+            block.StartsWith("formal_input_", StringComparison.Ordinal))
         {
             int target = ParseTrailingNumber(item, Mathf.CeilToInt(scale * 0.5f));
-            // One recoverable first-use miss remains in the final value for a realistic input check.
-            if (block.Contains("paxsm") && record.itemIndex == 1)
+            // Keep one realistic first-use miss in the formal PAXSM data for regression coverage.
+            if (block.StartsWith("formal_input_", StringComparison.Ordinal) &&
+                block.Contains("paxsm") && record.itemIndex == 1)
                 target = Mathf.Clamp(target + 1, 1, scale);
             return target;
         }

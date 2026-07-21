@@ -71,23 +71,19 @@ public sealed class XRWorkloadProbeBehaviorCollector : MonoBehaviour
     public bool RawSamplesExpected => writeRawSamples;
 
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
-    static void InstallOnlyInXRWorkloadProbeScene()
+    static void InstallForWorkloadProbeController()
     {
         Scene activeScene = SceneManager.GetActiveScene();
-        if (!activeScene.IsValid() ||
-            !string.Equals(activeScene.name, "XRWorkloadProbeScene", StringComparison.Ordinal))
+        if (!activeScene.IsValid())
             return;
 
-        GameObject bootstrap = GameObject.Find("XR Workload Probe Bootstrap");
-        if (bootstrap == null)
+        XRWorkloadProbeSceneController controller =
+            UnityEngine.Object.FindFirstObjectByType<XRWorkloadProbeSceneController>();
+        if (controller == null || controller.questionnaireOnlyMode ||
+            controller.GetComponent<XRWorkloadProbeBehaviorCollector>() != null)
             return;
 
-        XRWorkloadProbeSceneController controller = bootstrap.GetComponent<XRWorkloadProbeSceneController>();
-        if (controller == null || bootstrap.GetComponent<XRWorkloadProbeBehaviorCollector>() != null)
-            return;
-
-        // Runtime-only installation keeps the shared Unity scene YAML untouched.
-        bootstrap.AddComponent<XRWorkloadProbeBehaviorCollector>();
+        controller.gameObject.AddComponent<XRWorkloadProbeBehaviorCollector>();
     }
 
     void Awake()

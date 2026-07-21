@@ -45,6 +45,7 @@ public sealed class ExperimentSetupController : MonoBehaviour
     Camera _researcherUiCamera;
     bool _isLoading;
     bool _initialized;
+    int _requestedSessionNumber;
 
     void Awake()
     {
@@ -73,7 +74,10 @@ public sealed class ExperimentSetupController : MonoBehaviour
         EnsureEventSystem();
         BuildInterface();
         RestoreLastSetup();
+        bool autoStartExternalRequest = ApplyResearcherConsoleRequest();
         RefreshState();
+        if (autoStartExternalRequest)
+            StartCoroutine(StartExternalRequestNextFrame());
     }
 
     void ResolveCatalog()
@@ -92,6 +96,8 @@ public sealed class ExperimentSetupController : MonoBehaviour
             "main", "Main questionnaire", "MainScene", "MainScene_Data"));
         _availableScenes.Add(new ExperimentSceneCatalog.SceneEntry(
             "workload", "Workload probe", "XRWorkloadProbeScene", "XRWorkloadProbe_Data"));
+        _availableScenes.Add(new ExperimentSceneCatalog.SceneEntry(
+            "combined-probe", "Combined probe repetition study", "XRCombinedProbeScene", "XRCombinedProbe_Data"));
         _availableScenes.Add(new ExperimentSceneCatalog.SceneEntry(
             "questionnaire-read", "Questionnaire with Read stage", "XRQuestionnaireReadScene", "XRQuestionnaireRead_Data"));
         _availableScenes.Add(new ExperimentSceneCatalog.SceneEntry(
@@ -398,7 +404,20 @@ public sealed class ExperimentSetupController : MonoBehaviour
             return;
         }
 
-        if (!ExperimentRunContext.Configure(scene, _participantInput.text, _outputInput.text, out string error))
+        string error;
+        bool configured = _requestedSessionNumber > 0
+            ? ExperimentRunContext.Configure(
+                scene,
+                _participantInput.text,
+                _outputInput.text,
+                _requestedSessionNumber,
+                out error)
+            : ExperimentRunContext.Configure(
+                scene,
+                _participantInput.text,
+                _outputInput.text,
+                out error);
+        if (!configured)
         {
             SetStatus(error, _errorColor);
             RefreshState();
@@ -412,6 +431,47 @@ public sealed class ExperimentSetupController : MonoBehaviour
         _startButton.interactable = false;
         SetStatus($"Run {ExperimentRunContext.RunId} created. Loading...", _accentColor);
         StartCoroutine(LoadSelectedScene(scene.sceneName));
+    }
+
+    bool ApplyResearcherConsoleRequest()
+    {
+        if (!Application.isPlaying ||
+            !ResearcherConsoleLaunchRequest.TryConsume(out ResearcherConsoleLaunchRequest.Payload request))
+            return false;
+
+        int sceneIndex = -1;
+        for (int i = 0; i < _availableScenes.Count; i++)
+        {
+            ExperimentSceneCatalog.SceneEntry candidate = _availableScenes[i];
+            if (candidate == null)
+                continue;
+            if (string.Equals(candidate.id, request.sceneId, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(candidate.sceneName, request.sceneName, StringComparison.OrdinalIgnoreCase))
+            {
+                sceneIndex = i;
+                break;
+            }
+        }
+
+        if (sceneIndex < 0)
+        {
+            SetStatus($"Researcher Console requested unavailable scene '{request.sceneName}'.", _errorColor);
+            return false;
+        }
+
+        _sceneDropdown.SetValueWithoutNotify(sceneIndex);
+        _participantInput.text = request.participantId ?? "";
+        if (!string.IsNullOrWhiteSpace(request.outputRoot))
+            _outputInput.text = request.outputRoot.Trim();
+        _requestedSessionNumber = Math.Max(0, request.sessionNumber);
+        return request.autoStart;
+    }
+
+    IEnumerator StartExternalRequestNextFrame()
+    {
+        yield return null;
+        SetStatus("Researcher Console request received. Starting experiment...", _accentColor);
+        StartExperiment();
     }
 
     IEnumerator LoadSelectedScene(string sceneName)

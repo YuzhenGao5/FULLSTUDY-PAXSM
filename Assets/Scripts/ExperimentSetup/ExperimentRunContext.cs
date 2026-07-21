@@ -13,6 +13,7 @@ public static class ExperimentRunContext
     {
         public string schemaVersion = "CAREXR_RunManifest_v1.0";
         public string participantId = "";
+        public int sessionNumber;
         public string runId = "";
         public string selectedSceneId = "";
         public string selectedSceneName = "";
@@ -39,6 +40,7 @@ public static class ExperimentRunContext
     public static bool IsConfigured => _current != null;
     public static RunManifest Current => _current;
     public static string ParticipantId => _current != null ? _current.participantId : "";
+    public static int SessionNumber => _current != null ? _current.sessionNumber : 0;
     public static string RunId => _current != null ? _current.runId : "";
     public static string RunDirectory => _current != null ? _current.runDirectory : "";
 
@@ -150,6 +152,16 @@ public static class ExperimentRunContext
         string outputRoot,
         out string error)
     {
+        return Configure(scene, participantId, outputRoot, 0, out error);
+    }
+
+    public static bool Configure(
+        ExperimentSceneCatalog.SceneEntry scene,
+        string participantId,
+        string outputRoot,
+        int sessionNumber,
+        out string error)
+    {
         error = "";
         if (scene == null || string.IsNullOrWhiteSpace(scene.sceneName))
         {
@@ -179,6 +191,7 @@ public static class ExperimentRunContext
             var manifest = new RunManifest
             {
                 participantId = normalizedParticipantId,
+                sessionNumber = Math.Max(0, sessionNumber),
                 runId = runId,
                 selectedSceneId = scene.id ?? "",
                 selectedSceneName = scene.sceneName,

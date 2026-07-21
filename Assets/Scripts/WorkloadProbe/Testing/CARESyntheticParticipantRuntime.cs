@@ -6,6 +6,7 @@ using System.Reflection;
 using System.Text;
 using UnityEngine;
 using UnityEngine.SceneManagement;
+using UnityEngine.UI;
 using UnityEngine.XR;
 
 /// <summary>
@@ -140,6 +141,8 @@ public sealed class CAREXRSyntheticParticipantOrchestrator : MonoBehaviour
         public string comparisonRunDirectory = "";
         public string workloadRunDirectory = "";
         public bool workloadRequested = true;
+        public bool combinedProbeOnly;
+        public bool enteredThroughExperimentSetup;
         public bool comparisonExportCompleted;
         public bool workloadExportCompleted;
         public bool workloadIntegrityPassed;
@@ -151,6 +154,8 @@ public sealed class CAREXRSyntheticParticipantOrchestrator : MonoBehaviour
     string _participantId;
     string _outputRoot;
     bool _runWorkloadProbe = true;
+    bool _useExperimentSetup;
+    bool _runCombinedProbeOnly;
     SyntheticRunSummary _summary;
 
     public static void Begin(string participantId, string outputRoot, bool runWorkloadProbe = true)
@@ -170,6 +175,45 @@ public sealed class CAREXRSyntheticParticipantOrchestrator : MonoBehaviour
         _instance.StartCoroutine(_instance.Run());
     }
 
+    public static void BeginFromExperimentSetup(
+        string participantId,
+        string outputRoot,
+        bool runWorkloadProbe = false)
+    {
+        if (_instance != null)
+            return;
+
+        CAREXRSyntheticParticipantRuntime.Activate(participantId);
+        var go = new GameObject("CAREXR Synthetic Participant Orchestrator");
+        DontDestroyOnLoad(go);
+        _instance = go.AddComponent<CAREXRSyntheticParticipantOrchestrator>();
+        _instance._participantId = CAREXRSyntheticParticipantRuntime.ParticipantId;
+        _instance._outputRoot = string.IsNullOrWhiteSpace(outputRoot)
+            ? ExperimentRunContext.GetDefaultOutputRoot()
+            : outputRoot;
+        _instance._runWorkloadProbe = runWorkloadProbe;
+        _instance._useExperimentSetup = true;
+        _instance.StartCoroutine(_instance.Run());
+    }
+
+    public static void BeginCombinedProbeOnly(string participantId, string outputRoot)
+    {
+        if (_instance != null)
+            return;
+
+        CAREXRSyntheticParticipantRuntime.Activate(participantId);
+        var go = new GameObject("CAREXR Synthetic Combined-Probe Orchestrator");
+        DontDestroyOnLoad(go);
+        _instance = go.AddComponent<CAREXRSyntheticParticipantOrchestrator>();
+        _instance._participantId = CAREXRSyntheticParticipantRuntime.ParticipantId;
+        _instance._outputRoot = string.IsNullOrWhiteSpace(outputRoot)
+            ? ExperimentRunContext.GetDefaultOutputRoot()
+            : outputRoot;
+        _instance._runWorkloadProbe = true;
+        _instance._runCombinedProbeOnly = true;
+        _instance.StartCoroutine(_instance.Run());
+    }
+
     IEnumerator Run()
     {
         UnityEngine.Random.InitState(100);
@@ -178,16 +222,49 @@ public sealed class CAREXRSyntheticParticipantOrchestrator : MonoBehaviour
             participantId = _participantId,
             scenario = CAREXRSyntheticParticipantRuntime.ScenarioId,
             startedUtc = DateTime.UtcNow.ToString("O"),
-            workloadRequested = _runWorkloadProbe
+            workloadRequested = _runWorkloadProbe,
+            combinedProbeOnly = _runCombinedProbeOnly,
+            enteredThroughExperimentSetup = _useExperimentSetup
         };
 
-        yield return RunScene(
-            new ExperimentSceneCatalog.SceneEntry(
-                "paxsm-comparison",
-                "PAXSM comparison study",
-                "PAXSMComparisonScene",
-                "PAXSMComparison_Data"),
-            isWorkload: false);
+        if (_runCombinedProbeOnly)
+        {
+            yield return RunScene(
+                new ExperimentSceneCatalog.SceneEntry(
+                    "combined-probe",
+                    "Combined probe repetition study",
+                    "XRCombinedProbeScene",
+                    "XRCombinedProbe_Data"),
+                isWorkload: true);
+
+            _summary.completed = string.IsNullOrEmpty(_summary.error) &&
+                                 _summary.workloadExportCompleted &&
+                                 _summary.workloadIntegrityPassed;
+            _summary.completedUtc = DateTime.UtcNow.ToString("O");
+            WriteOverallSummary();
+            CAREXRSyntheticParticipantRuntime.Deactivate();
+            Debug.Log(_summary.completed
+                ? $"[CARE-XR Synthetic] {_participantId} combined-probe run completed and passed integrity checks."
+                : $"[CARE-XR Synthetic] Combined-probe run failed: {_summary.error}");
+            yield return new WaitForSecondsRealtime(0.5f);
+            UnityEditor.EditorApplication.isPlaying = false;
+            yield break;
+        }
+
+        if (_useExperimentSetup)
+        {
+            yield return RunComparisonThroughExperimentSetup();
+        }
+        else
+        {
+            yield return RunScene(
+                new ExperimentSceneCatalog.SceneEntry(
+                    "paxsm-comparison",
+                    "PAXSM comparison study",
+                    "PAXSMComparisonScene",
+                    "PAXSMComparison_Data"),
+                isWorkload: false);
+        }
 
         if (_runWorkloadProbe && string.IsNullOrEmpty(_summary.error))
         {
@@ -216,6 +293,99 @@ public sealed class CAREXRSyntheticParticipantOrchestrator : MonoBehaviour
         UnityEditor.EditorApplication.isPlaying = false;
     }
 
+    IEnumerator RunComparisonThroughExperimentSetup()
+    {
+        const string setupSceneName = "ExperimentSetup";
+        const string comparisonSceneName = "PAXSMComparisonScene";
+        if (!string.Equals(SceneManager.GetActiveScene().name, setupSceneName, StringComparison.Ordinal))
+        {
+            _summary.error = $"Expected {setupSceneName} to be active before the setup-path test.";
+            yield break;
+        }
+
+        ExperimentSetupController setup = null;
+        float setupDeadline = Time.realtimeSinceStartup + 20f;
+        while (setup == null && Time.realtimeSinceStartup < setupDeadline)
+        {
+            setup = FindFirstObjectByType<ExperimentSetupController>();
+            yield return null;
+        }
+        if (setup == null)
+        {
+            _summary.error = "Experiment Setup did not create its controller.";
+            yield break;
+        }
+
+        const BindingFlags flags = BindingFlags.Instance | BindingFlags.NonPublic;
+        InputField participantInput = typeof(ExperimentSetupController)
+            .GetField("_participantInput", flags)?.GetValue(setup) as InputField;
+        InputField outputInput = typeof(ExperimentSetupController)
+            .GetField("_outputInput", flags)?.GetValue(setup) as InputField;
+        Dropdown sceneDropdown = typeof(ExperimentSetupController)
+            .GetField("_sceneDropdown", flags)?.GetValue(setup) as Dropdown;
+        Button startButton = typeof(ExperimentSetupController)
+            .GetField("_startButton", flags)?.GetValue(setup) as Button;
+        var availableScenes = typeof(ExperimentSetupController)
+            .GetField("_availableScenes", flags)?.GetValue(setup) as IList;
+
+        if (participantInput == null || outputInput == null || sceneDropdown == null ||
+            startButton == null || availableScenes == null)
+        {
+            _summary.error = "Experiment Setup form controls could not be resolved.";
+            yield break;
+        }
+
+        int comparisonIndex = -1;
+        for (int i = 0; i < availableScenes.Count; i++)
+        {
+            var entry = availableScenes[i] as ExperimentSceneCatalog.SceneEntry;
+            if (entry != null && string.Equals(entry.sceneName, comparisonSceneName, StringComparison.Ordinal))
+            {
+                comparisonIndex = i;
+                break;
+            }
+        }
+        if (comparisonIndex < 0)
+        {
+            _summary.error = "PAXSM comparison is not available in the Experiment Setup catalog.";
+            yield break;
+        }
+
+        sceneDropdown.value = comparisonIndex;
+        participantInput.text = _participantId;
+        outputInput.text = _outputRoot;
+        yield return null;
+
+        if (!startButton.interactable)
+        {
+            _summary.error = "Experiment Setup rejected the synthetic P888 configuration.";
+            yield break;
+        }
+
+        startButton.onClick.Invoke();
+        yield return null;
+        if (!ExperimentRunContext.IsConfigured)
+        {
+            _summary.error = "Experiment Setup did not create an active run after Start experiment.";
+            yield break;
+        }
+
+        _summary.comparisonRunDirectory = ExperimentRunContext.RunDirectory;
+        WriteSyntheticMarker(_summary.comparisonRunDirectory, comparisonSceneName);
+
+        float sceneDeadline = Time.realtimeSinceStartup + 20f;
+        while (!string.Equals(SceneManager.GetActiveScene().name, comparisonSceneName, StringComparison.Ordinal) &&
+               Time.realtimeSinceStartup < sceneDeadline)
+            yield return null;
+        if (!string.Equals(SceneManager.GetActiveScene().name, comparisonSceneName, StringComparison.Ordinal))
+        {
+            _summary.error = $"Experiment Setup did not load {comparisonSceneName}.";
+            yield break;
+        }
+
+        yield return WaitForSceneCompletion(comparisonSceneName, isWorkload: false);
+    }
+
     IEnumerator RunScene(ExperimentSceneCatalog.SceneEntry scene, bool isWorkload)
     {
         ExperimentRunContext.ClearActiveRun();
@@ -241,6 +411,11 @@ public sealed class CAREXRSyntheticParticipantOrchestrator : MonoBehaviour
         while (!load.isDone)
             yield return null;
 
+        yield return WaitForSceneCompletion(scene.sceneName, isWorkload);
+    }
+
+    IEnumerator WaitForSceneCompletion(string sceneName, bool isWorkload)
+    {
         XRWorkloadProbeSceneController controller = null;
         float controllerDeadline = Time.realtimeSinceStartup + 20f;
         while (controller == null && Time.realtimeSinceStartup < controllerDeadline)
@@ -250,7 +425,7 @@ public sealed class CAREXRSyntheticParticipantOrchestrator : MonoBehaviour
         }
         if (controller == null)
         {
-            _summary.error = $"{scene.sceneName} did not create its controller.";
+            _summary.error = $"{sceneName} did not create its controller.";
             yield break;
         }
 
@@ -277,7 +452,7 @@ public sealed class CAREXRSyntheticParticipantOrchestrator : MonoBehaviour
 
         if (!completed)
         {
-            _summary.error = $"{scene.sceneName} did not finish within 12 minutes.";
+            _summary.error = $"{sceneName} did not finish within 12 minutes.";
             yield break;
         }
 

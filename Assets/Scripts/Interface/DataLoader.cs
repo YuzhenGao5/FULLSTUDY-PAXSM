@@ -141,6 +141,8 @@ public class KnobBehaviorMergedCSVExporter : MonoBehaviour
 
         if (ExperimentRunContext.TryGetParticipantNumber(out int configuredParticipantNumber))
             participantNumber = configuredParticipantNumber;
+        if (ExperimentRunContext.SessionNumber > 0)
+            sessionNumber = ExperimentRunContext.SessionNumber;
 
         if (answerKnob == null || confidenceKnob == null)
         {

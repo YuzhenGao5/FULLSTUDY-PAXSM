@@ -16,6 +16,7 @@ public static class ExperimentSetupSceneBuilder
     const string SetupScenePath = "Assets/Scenes/ExperimentSetup.unity";
     const string MainScenePath = "Assets/Scenes/MainScene.unity";
     const string WorkloadScenePath = "Assets/Scenes/XRWorkloadProbeScene.unity";
+    const string CombinedScenePath = "Assets/Scenes/XRCombinedProbeScene.unity";
     const string QuestionnaireScenePath = "Assets/Scenes/XRQuestionnaireReadScene.unity";
     const string ComparisonScenePath = "Assets/Scenes/PAXSMComparisonScene.unity";
     const string XrOriginPrefabPath = "Assets/Samples/XR Interaction Toolkit/3.2.1/Starter Assets/Prefabs/XR Origin (XR Rig).prefab";
@@ -91,6 +92,7 @@ public static class ExperimentSetupSceneBuilder
     {
         EnsureSceneExists(MainScenePath);
         EnsureSceneExists(WorkloadScenePath);
+        EnsureSceneExists(CombinedScenePath);
         EnsureSceneExists(QuestionnaireScenePath);
         EnsureSceneExists(ComparisonScenePath);
         EnsureAssetFolder(CatalogFolder);
@@ -114,6 +116,11 @@ public static class ExperimentSetupSceneBuilder
                 "Workload probe",
                 "XRWorkloadProbeScene",
                 "XRWorkloadProbe_Data"),
+            new ExperimentSceneCatalog.SceneEntry(
+                "combined-probe",
+                "Combined probe repetition study",
+                "XRCombinedProbeScene",
+                "XRCombinedProbe_Data"),
             new ExperimentSceneCatalog.SceneEntry(
                 "questionnaire-read",
                 "Questionnaire with Read stage",
@@ -224,17 +231,17 @@ public static class ExperimentSetupSceneBuilder
         if (canvas.worldCamera.stereoTargetEye != StereoTargetEyeMask.None ||
             researcherCameraData == null || researcherCameraData.allowXRRendering)
             throw new InvalidOperationException("Researcher setup UI Camera is still allowed to render in the headset.");
-        if (dropdown == null || dropdown.options.Count != 4)
-            throw new InvalidOperationException("Experiment scene dropdown was not populated with four scenes.");
+        if (dropdown == null || dropdown.options.Count != 5)
+            throw new InvalidOperationException("Experiment scene dropdown was not populated with five scenes.");
         if (inputs.Length < 2)
             throw new InvalidOperationException("Participant and output input fields were not created.");
         if (startButton == null)
             throw new InvalidOperationException("Start Experiment button was not created.");
-        if (EditorBuildSettings.scenes.Length < 5 ||
+        if (EditorBuildSettings.scenes.Length < 6 ||
             !string.Equals(EditorBuildSettings.scenes[0].path, SetupScenePath, StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("ExperimentSetup is not the first Build Settings scene.");
 
-        Debug.Log("[ExperimentSetup] Runtime UI smoke test passed: 4 scenes, 2 inputs, start action, and build order.");
+        Debug.Log("[ExperimentSetup] Runtime UI smoke test passed: 5 scenes, 2 inputs, start action, and build order.");
         EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
     }
 
@@ -451,6 +458,7 @@ public static class ExperimentSetupSceneBuilder
             SetupScenePath,
             MainScenePath,
             WorkloadScenePath,
+            CombinedScenePath,
             QuestionnaireScenePath,
             ComparisonScenePath
         };

@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using UnityEditor;
 using UnityEngine;
+using UnityEngine.SceneManagement;
 
 [InitializeOnLoad]
 public static class CAREXRSyntheticParticipantEditorRunner
@@ -12,6 +13,8 @@ public static class CAREXRSyntheticParticipantEditorRunner
         public string participantId = "P100";
         public string outputRoot = "";
         public bool runWorkloadProbe = true;
+        public bool useExperimentSetup;
+        public bool runCombinedProbeOnly;
     }
 
     const string PendingSessionKey = "CAREXR.SyntheticParticipant.PendingRequest";
@@ -21,6 +24,11 @@ public static class CAREXRSyntheticParticipantEditorRunner
     {
         EditorApplication.update += CheckForRequest;
         EditorApplication.playModeStateChanged += OnPlayModeStateChanged;
+
+        // A script reload can interrupt an active synthetic run. If a new request is
+        // waiting, return to Edit Mode first so the request can be started cleanly.
+        if (EditorApplication.isPlayingOrWillChangePlaymode && File.Exists(RequestPath()))
+            EditorApplication.delayCall += () => EditorApplication.isPlaying = false;
     }
 
     [MenuItem("CARE-XR/Testing/Run P100 Comparison + Workload Probe (Synthetic)")]
@@ -36,6 +44,43 @@ public static class CAREXRSyntheticParticipantEditorRunner
         File.WriteAllText(requestPath, JsonUtility.ToJson(request, true));
         AssetDatabase.Refresh();
         Debug.Log($"[CARE-XR Synthetic] Queued P100 run via {requestPath}");
+    }
+
+    [MenuItem("CARE-XR/Testing/Run P888 Comparison via Experiment Setup (Synthetic)")]
+    public static void QueueP888SetupRun()
+    {
+        string requestPath = RequestPath();
+        Directory.CreateDirectory(Path.GetDirectoryName(requestPath));
+        var request = new Request
+        {
+            participantId = "P888",
+            outputRoot = ExperimentRunContext.GetDefaultOutputRoot(),
+            runWorkloadProbe = false,
+            useExperimentSetup = true
+        };
+        File.WriteAllText(requestPath, JsonUtility.ToJson(request, true));
+        AssetDatabase.Refresh();
+        Debug.Log($"[CARE-XR Synthetic] Queued P888 comparison run through Experiment Setup via {requestPath}");
+    }
+
+    [MenuItem("CARE-XR/Testing/Run P888 Combined Probe Only (Synthetic)")]
+    public static void QueueP888CombinedProbeRun()
+    {
+        string requestPath = RequestPath();
+        Directory.CreateDirectory(Path.GetDirectoryName(requestPath));
+        var request = new Request
+        {
+            participantId = "P888",
+            outputRoot = Path.Combine(
+                Directory.GetParent(Application.dataPath)?.FullName ?? ".",
+                "Temp",
+                "CombinedProbeSyntheticOutput"),
+            runWorkloadProbe = true,
+            runCombinedProbeOnly = true
+        };
+        File.WriteAllText(requestPath, JsonUtility.ToJson(request, true));
+        AssetDatabase.Refresh();
+        Debug.Log($"[CARE-XR Synthetic] Queued P888 combined-probe run via {requestPath}");
     }
 
     static void CheckForRequest()
@@ -56,6 +101,15 @@ public static class CAREXRSyntheticParticipantEditorRunner
         if (string.IsNullOrWhiteSpace(request.outputRoot))
             request.outputRoot = ExperimentRunContext.GetDefaultOutputRoot();
 
+        if (request.useExperimentSetup &&
+            !string.Equals(SceneManager.GetActiveScene().name, "ExperimentSetup", StringComparison.Ordinal))
+        {
+            Debug.LogError(
+                "[CARE-XR Synthetic] The ExperimentSetup scene must be open before running the setup-path test.");
+            File.Delete(path);
+            return;
+        }
+
         SessionState.SetString(PendingSessionKey, JsonUtility.ToJson(request));
         File.Delete(path);
         EditorApplication.isPlaying = true;
@@ -72,10 +126,26 @@ public static class CAREXRSyntheticParticipantEditorRunner
 
         SessionState.EraseString(PendingSessionKey);
         Request request = JsonUtility.FromJson<Request>(json) ?? new Request();
-        CAREXRSyntheticParticipantOrchestrator.Begin(
-            request.participantId,
-            request.outputRoot,
-            request.runWorkloadProbe);
+        if (request.runCombinedProbeOnly)
+        {
+            CAREXRSyntheticParticipantOrchestrator.BeginCombinedProbeOnly(
+                request.participantId,
+                request.outputRoot);
+        }
+        else if (request.useExperimentSetup)
+        {
+            CAREXRSyntheticParticipantOrchestrator.BeginFromExperimentSetup(
+                request.participantId,
+                request.outputRoot,
+                request.runWorkloadProbe);
+        }
+        else
+        {
+            CAREXRSyntheticParticipantOrchestrator.Begin(
+                request.participantId,
+                request.outputRoot,
+                request.runWorkloadProbe);
+        }
     }
 
     static string RequestPath()

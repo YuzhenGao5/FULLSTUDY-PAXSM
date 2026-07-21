@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build the two-row, single-factor PAXSM Comparison analysis table."""
+"""Rebuild the two-row Study 1 PAXSM input-method comparison table."""
 
 from __future__ import annotations
 
@@ -12,9 +12,8 @@ import numpy as np
 import pandas as pd
 
 
-SCHEMA_VERSION = "CAREXR_PAXSMComparison_AnalysisReady_v3"
+SCHEMA_VERSION = "CAREXR_PAXSMComparison_AnalysisReady_v4"
 METHODS = ("paxsm", "point_click")
-EXPECTED_INPUT_ITEMS = 8
 NASA_ITEMS = (
     ("Mental", "nasa_tlx_mental"),
     ("Physical", "nasa_tlx_physical"),
@@ -27,7 +26,7 @@ NASA_ITEMS = (
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Create the single-factor PAXSMComparison_AnalysisReady CSV."
+        description="Create the Study 1 PAXSMComparison_AnalysisReady CSV."
     )
     parser.add_argument("input_dir", type=Path, help="PAXSMComparison_Data directory")
     parser.add_argument("--output", type=Path, help="Optional output CSV path")
@@ -86,35 +85,42 @@ def run_id_from(root: Path) -> str:
     return ""
 
 
-def input_summary(questionnaire: pd.DataFrame, method: str) -> dict[str, object]:
-    data = questionnaire[questionnaire["blockId"].eq(f"input_check_{method}")].copy()
-    targets = numeric(data["itemId"].str.extract(r"_(\d+)$", expand=False))
-    selected = numeric(data["selectedScore"])
-    valid = targets.notna() & selected.gt(0)
-    errors = (selected[valid] - targets[valid]).abs()
-    first = numeric(data["answerFirstInteractionRt"])
+def formal_summary(formal: pd.DataFrame, method: str) -> dict[str, object]:
+    data = formal[formal["method"].eq(method)].copy()
+    completed = numeric(data["completed"]).fillna(0).gt(0)
+    errors = numeric(data.loc[completed, "absoluteError"]).dropna()
+    exact = numeric(data.loc[completed, "exactMatch"]).fillna(0).gt(0)
+    correction = numeric(data.loc[completed, "correctionOccurred"]).fillna(0).gt(0)
+    correction_events = numeric(data["correctionCount"]).fillna(0)
+    first = numeric(data["firstInteractionRt"])
     first = first[first.ge(0)]
+    completion_times = numeric(data.loc[completed, "completionTime"]).dropna()
     response_mode = data["responseMode"].dropna().astype(str)
     return {
-        "inputResponseMode": response_mode.iloc[0] if len(response_mode) else "",
-        "inputItems": int(len(data)),
-        "inputExactMatches": int(errors.eq(0).sum()),
-        "inputAccuracy": float(errors.eq(0).mean()) if len(errors) else np.nan,
-        "inputMeanAbsoluteError": float(errors.mean()) if len(errors) else np.nan,
-        "inputMaxAbsoluteError": int(errors.max()) if len(errors) else np.nan,
-        "inputMeanAnswerRt": safe_mean(data["answerRt"]),
-        "inputMedianAnswerRt": safe_median(data["answerRt"]),
-        "inputValidFirstInteractionItems": int(len(first)),
-        "inputMeanFirstInteractionRt": float(first.mean()) if len(first) else np.nan,
-        "inputConfirmAttempts": int(numeric(data["answerConfirmAttemptCount"]).fillna(0).sum()),
-        "inputConfirmCancels": int(numeric(data["answerConfirmCancelCount"]).fillna(0).sum()),
-        "inputIncompleteItems": int((~valid).sum()),
+        "formalResponseMode": response_mode.iloc[0] if len(response_mode) else "",
+        "formalItems": int(len(data)),
+        "formalCompletedItems": int(completed.sum()),
+        "formalCompletionRate": float(completed.mean()) if len(data) else np.nan,
+        "formalExactMatches": int(exact.sum()),
+        "formalAccuracy": float(exact.mean()) if len(exact) else np.nan,
+        "formalMeanAbsoluteError": float(errors.mean()) if len(errors) else np.nan,
+        "formalMaxAbsoluteError": int(errors.max()) if len(errors) else np.nan,
+        "formalMeanCompletionTime": float(completion_times.mean()) if len(completion_times) else np.nan,
+        "formalMedianCompletionTime": float(completion_times.median()) if len(completion_times) else np.nan,
+        "formalSdCompletionTime": float(completion_times.std(ddof=1)) if len(completion_times) > 1 else np.nan,
+        "formalTotalCompletionTime": float(completion_times.sum()) if len(completion_times) else np.nan,
+        "formalValidFirstInteractionItems": int(len(first)),
+        "formalMeanFirstInteractionRt": float(first.mean()) if len(first) else np.nan,
+        "formalCorrectedTrials": int(correction.sum()),
+        "formalCorrectionRate": float(correction.mean()) if len(correction) else np.nan,
+        "formalCorrectionEvents": int(correction_events.sum()),
+        "formalConfirmAttempts": int(numeric(data["confirmAttempts"]).fillna(0).sum()),
+        "formalConfirmCancels": int(numeric(data["confirmCancels"]).fillna(0).sum()),
+        "formalIncompleteItems": int((~completed).sum()),
     }
 
 
-def sus_summary(
-    questionnaire: pd.DataFrame, pages: pd.DataFrame, method: str
-) -> dict[str, object]:
+def sus_summary(questionnaire: pd.DataFrame, pages: pd.DataFrame, method: str) -> dict[str, object]:
     data = questionnaire[questionnaire["blockId"].eq(f"sus_{method}")].copy()
     data = data.sort_values("itemIndex")
     responses: dict[int, int] = {}
@@ -139,116 +145,77 @@ def sus_summary(
     return result
 
 
-def method_summary(
-    arithmetic: pd.DataFrame,
-    questionnaire: pd.DataFrame,
-    pages: pd.DataFrame,
-    method: str,
-    collect_confidence: bool,
-) -> dict[str, object]:
-    task = arithmetic[arithmetic["method"].eq(method)].copy()
-    demand_column = "taskDemand" if "taskDemand" in task.columns else "difficulty"
-    result: dict[str, object] = {
-        "methodPresentationOrder": int(task["presentationOrder"].min()) if len(task) else np.nan,
-        "taskForm": str(task["form"].iloc[0]) if len(task) else "",
-        "taskDemand": str(task[demand_column].iloc[0]) if len(task) else "",
-        "taskTrials": int(len(task)),
-        "taskCorrect": int(numeric(task["isCorrect"]).fillna(0).sum()),
-        "taskAccuracy": safe_mean(task["isCorrect"]),
-        "taskTimeouts": int(numeric(task["timeout"]).fillna(0).sum()),
-        "taskMeanDecisionRt": safe_mean(task["decisionRt"]),
-        "taskMedianDecisionRt": safe_median(task["decisionRt"]),
-        "taskSdDecisionRt": safe_sd(task["decisionRt"]),
-        "taskTotalDecisionRt": float(numeric(task["decisionRt"]).fillna(0).sum()) if len(task) else np.nan,
-        "taskMeanPointerPath": safe_mean(task["pointerPath"]),
-        "taskMeanPointerPeakSpeed": safe_mean(task["pointerPeakSpeed"]),
-        "taskMeanHoverChanges": safe_mean(task["hoverChangeCount"]),
-    }
-
+def nasa_summary(questionnaire: pd.DataFrame, pages: pd.DataFrame, method: str) -> dict[str, object]:
     nasa = questionnaire[questionnaire["blockId"].eq(f"comparison_{method}")].copy()
     nasa = nasa[nasa["itemId"].isin([item_id for _, item_id in NASA_ITEMS])]
     response_mode = nasa["responseMode"].dropna().astype(str)
-    result["nasaResponseMode"] = response_mode.iloc[0] if len(response_mode) else ""
-    result["nasaItems"] = int(nasa["itemId"].nunique())
-    result["nasaComplete"] = int(nasa["itemId"].nunique() == 6)
-    ratings: list[float] = []
-    confidences: list[float] = []
+    result: dict[str, object] = {
+        "nasaResponseMode": response_mode.iloc[0] if len(response_mode) else "",
+        "nasaItems": int(nasa["itemId"].nunique()),
+        "nasaComplete": int(nasa["itemId"].nunique() == 6),
+    }
+    workload_coded: list[float] = []
     for label, item_id in NASA_ITEMS:
         item = nasa[nasa["itemId"].eq(item_id)]
         rating = float(item["selectedScore"].iloc[0]) if len(item) else np.nan
-        confidence = float(item["confidence"].iloc[0]) if len(item) else np.nan
         result[f"nasa{label}"] = rating
-        result[f"confidence{label}"] = confidence
         if not np.isnan(rating):
-            ratings.append(rating)
-        if not np.isnan(confidence) and 1 <= confidence <= 5:
-            confidences.append(confidence)
-    result["nasaRawMean"] = float(np.mean(ratings)) if ratings else np.nan
-    result["confidenceComplete"] = int(not collect_confidence or len(confidences) == 6)
-    result["confidenceMean"] = float(np.mean(confidences)) if confidences else np.nan
+            scale = float(item["scale"].iloc[0]) if "scale" in item else 21.0
+            workload_coded.append(scale + 1.0 - rating if label == "Performance" else rating)
+    performance = result.get("nasaPerformance", np.nan)
+    result["nasaPerformanceWorkloadCoded"] = (
+        22.0 - float(performance) if not np.isnan(performance) else np.nan
+    )
+    result["nasaRawMean"] = float(np.mean(workload_coded)) if workload_coded else np.nan
     result["questionnaireMeanReadRt"] = safe_nonnegative_mean(nasa["readRt"])
     result["questionnaireMeanAnswerRt"] = safe_mean(nasa["answerRt"])
     result["questionnaireMeanAnswerDecisionRt"] = safe_mean(nasa["answerDecisionRt"])
-    confidence_rt = numeric(nasa["confidenceRt"])
-    valid_confidence_rt = confidence_rt[confidence_rt.gt(0)]
-    result["questionnaireMeanConfidenceRt"] = (
-        float(valid_confidence_rt.mean()) if len(valid_confidence_rt) else np.nan
-    )
     total_rt = (
         numeric(nasa["readRt"]).clip(lower=0).fillna(0).sum()
         + numeric(nasa["answerRt"]).clip(lower=0).fillna(0).sum()
-        + numeric(nasa["confidenceRt"]).clip(lower=0).fillna(0).sum()
     )
     answer_page_rt = page_stage_total(pages, f"comparison_{method}", "Answer")
     if not np.isnan(answer_page_rt):
-        confidence_page_rt = page_stage_total(pages, f"comparison_{method}", "Confidence")
-        total_rt = answer_page_rt + (0.0 if np.isnan(confidence_page_rt) else confidence_page_rt)
+        total_rt = answer_page_rt
     result["questionnaireTotalRt"] = float(total_rt) if len(nasa) else np.nan
     result["answerConfirmAttempts"] = int(numeric(nasa["answerConfirmAttemptCount"]).fillna(0).sum())
     result["answerConfirmCancels"] = int(numeric(nasa["answerConfirmCancelCount"]).fillna(0).sum())
     return result
 
 
-def quality_flags(
-    row: dict[str, object], expected_trials: int, collect_confidence: bool
-) -> str:
+def quality_flags(row: dict[str, object], expected_formal: int) -> str:
     flags: list[str] = []
-    if row["inputItems"] != EXPECTED_INPUT_ITEMS:
-        flags.append(f"input_items_{row['inputItems']}_of_{EXPECTED_INPUT_ITEMS}")
-    if row["inputIncompleteItems"]:
-        flags.append(f"input_incomplete_{row['inputIncompleteItems']}")
+    if row["formalItems"] != expected_formal:
+        flags.append(f"formal_items_{row['formalItems']}_of_{expected_formal}")
+    if row["formalIncompleteItems"]:
+        flags.append(f"formal_incomplete_{row['formalIncompleteItems']}")
     if row["susAnsweredItems"] != 10:
         flags.append(f"sus_items_{row['susAnsweredItems']}_of_10")
-    if row["taskTrials"] != expected_trials:
-        flags.append(f"task_items_{row['taskTrials']}_of_{expected_trials}")
     if row["nasaItems"] != 6:
         flags.append(f"nasa_items_{row['nasaItems']}_of_6")
-    if collect_confidence and row["confidenceComplete"] != 1:
-        flags.append("confidence_incomplete")
     return ";".join(flags) if flags else "none"
 
 
 def build(root: Path, output: Path | None) -> Path:
     root = root.resolve()
     manifest_path = newest_completed(root, "PAXSMComparison_Manifest_")
-    arithmetic_path = newest_completed(root, "PAXSMComparison_Arithmetic_")
+    formal_path = newest_completed(root, "PAXSMComparison_FormalInput_")
     manifest = pd.read_csv(manifest_path).iloc[0]
     participant_id = str(manifest["participantId"])
     questionnaire_path = newest_completed(root, f"CAREXR_Questionnaire_{participant_id}_")
     pages_path = newest_completed(root, "PAXSMComparison_PointClickPages_")
-    arithmetic = pd.read_csv(arithmetic_path)
+    formal = pd.read_csv(formal_path)
     questionnaire = pd.read_csv(questionnaire_path)
     pages = pd.read_csv(pages_path)
 
     suffix = manifest_path.name[len("PAXSMComparison_Manifest_") : -len(".csv")]
     output = output.resolve() if output else root.parent / f"PAXSMComparison_AnalysisReady_{suffix}.csv"
-    trials_field = "arithmeticTrialsPerMethod" if "arithmeticTrialsPerMethod" in manifest else "arithmeticTrialsPerBlock"
-    expected_trials = int(manifest[trials_field])
-    collect_confidence = bool(int(manifest["confidenceAfterWorkload"]))
+    expected_formal = int(manifest["formalItemsPerMethod"])
     generated_utc = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
     rows: list[dict[str, object]] = []
     for method in METHODS:
+        method_formal = formal[formal["method"].eq(method)]
         row: dict[str, object] = {
             "analysisSchemaVersion": SCHEMA_VERSION,
             "participantId": participant_id,
@@ -257,39 +224,39 @@ def build(root: Path, output: Path | None) -> Path:
             "runId": run_id_from(root),
             "sequenceCode": str(manifest["sequenceCode"]),
             "method": method,
+            "methodPresentationOrder": int(numeric(method_formal["presentationOrder"]).min()) if len(method_formal) else np.nan,
+            "targetOrderForm": str(method_formal["targetOrderForm"].iloc[0]) if len(method_formal) else "",
             "exportReason": "completed",
             "generatedUtc": generated_utc,
         }
-        row.update(method_summary(arithmetic, questionnaire, pages, method, collect_confidence))
-        row.update(input_summary(questionnaire, method))
+        row.update(formal_summary(formal, method))
         row.update(sus_summary(questionnaire, pages, method))
-        flags = quality_flags(row, expected_trials, collect_confidence)
+        row.update(nasa_summary(questionnaire, pages, method))
+        flags = quality_flags(row, expected_formal)
         row["methodComplete"] = int(flags == "none")
         row["qualityFlags"] = flags
         rows.append(row)
 
-    base_columns = [
+    columns = [
         "analysisSchemaVersion", "participantId", "sessionNumber", "conditionLabel", "runId",
-        "sequenceCode", "method", "methodPresentationOrder", "taskForm", "taskDemand",
+        "sequenceCode", "method", "methodPresentationOrder", "targetOrderForm",
         "methodComplete", "qualityFlags", "exportReason", "generatedUtc",
-        "inputResponseMode", "inputItems", "inputExactMatches", "inputAccuracy",
-        "inputMeanAbsoluteError", "inputMaxAbsoluteError", "inputMeanAnswerRt",
-        "inputMedianAnswerRt", "inputValidFirstInteractionItems", "inputMeanFirstInteractionRt",
-        "inputConfirmAttempts", "inputConfirmCancels", "inputIncompleteItems",
+        "formalResponseMode", "formalItems", "formalCompletedItems", "formalCompletionRate",
+        "formalExactMatches", "formalAccuracy", "formalMeanAbsoluteError", "formalMaxAbsoluteError",
+        "formalMeanCompletionTime", "formalMedianCompletionTime", "formalSdCompletionTime",
+        "formalTotalCompletionTime", "formalValidFirstInteractionItems", "formalMeanFirstInteractionRt",
+        "formalCorrectedTrials", "formalCorrectionRate", "formalCorrectionEvents",
+        "formalConfirmAttempts", "formalConfirmCancels", "formalIncompleteItems",
         "susAnsweredItems", "susScore", "susComplete", "susTotalRt",
         *[f"sus{i:02d}" for i in range(1, 11)],
-        "taskTrials", "taskCorrect", "taskAccuracy", "taskTimeouts", "taskMeanDecisionRt",
-        "taskMedianDecisionRt", "taskSdDecisionRt", "taskTotalDecisionRt",
-        "taskMeanPointerPath", "taskMeanPointerPeakSpeed", "taskMeanHoverChanges",
         "nasaResponseMode", "nasaItems", "nasaComplete",
-        *[f"nasa{label}" for label, _ in NASA_ITEMS],
-        "nasaRawMean", "confidenceComplete", "confidenceMean",
-        *[f"confidence{label}" for label, _ in NASA_ITEMS],
+        *[f"nasa{label}" for label, _ in NASA_ITEMS[:4]],
+        "nasaPerformanceWorkloadCoded", "nasaEffort", "nasaFrustration", "nasaRawMean",
         "questionnaireMeanReadRt", "questionnaireMeanAnswerRt",
-        "questionnaireMeanAnswerDecisionRt", "questionnaireMeanConfidenceRt",
-        "questionnaireTotalRt", "answerConfirmAttempts", "answerConfirmCancels",
+        "questionnaireMeanAnswerDecisionRt", "questionnaireTotalRt",
+        "answerConfirmAttempts", "answerConfirmCancels",
     ]
-    frame = pd.DataFrame(rows, columns=base_columns)
+    frame = pd.DataFrame(rows, columns=columns)
     output.parent.mkdir(parents=True, exist_ok=True)
     frame.to_csv(output, index=False, encoding="utf-8-sig", float_format="%.4f")
     return output
@@ -297,8 +264,7 @@ def build(root: Path, output: Path | None) -> Path:
 
 def main() -> None:
     args = parse_args()
-    output = build(args.input_dir, args.output)
-    print(output)
+    print(build(args.input_dir, args.output))
 
 
 if __name__ == "__main__":

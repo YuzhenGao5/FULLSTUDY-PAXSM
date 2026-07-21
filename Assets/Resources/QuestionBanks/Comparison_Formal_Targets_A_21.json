@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "scale": 21,
+  "default_mode": "slider",
+  "labels": ["1", "6", "11", "16", "21"],
+  "items": [
+    { "id": "formal_target_04", "stem": "Select target value 4." },
+    { "id": "formal_target_18", "stem": "Select target value 18." },
+    { "id": "formal_target_08", "stem": "Select target value 8." },
+    { "id": "formal_target_14", "stem": "Select target value 14." },
+    { "id": "formal_target_02", "stem": "Select target value 2." },
+    { "id": "formal_target_20", "stem": "Select target value 20." },
+    { "id": "formal_target_06", "stem": "Select target value 6." },
+    { "id": "formal_target_16", "stem": "Select target value 16." },
+    { "id": "formal_target_01", "stem": "Select target value 1." },
+    { "id": "formal_target_21", "stem": "Select target value 21." },
+    { "id": "formal_target_10", "stem": "Select target value 10." },
+    { "id": "formal_target_12", "stem": "Select target value 12." }
+  ]
+}
