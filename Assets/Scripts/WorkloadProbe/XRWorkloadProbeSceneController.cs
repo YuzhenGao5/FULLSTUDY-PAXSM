@@ -32,6 +32,12 @@ public partial class XRWorkloadProbeSceneController : MonoBehaviour
         [Range(1, 7)] public int distractorCount = 3;
         [Range(0.8f, 4.0f)] public float targetDistance = 1.6f;
         [Range(0.08f, 0.35f)] public float targetSize = 0.22f;
+        [Tooltip("Optional horizontal span for a wide movement layout. Zero uses the standard distance-derived layout.")]
+        [Range(0f, 5.2f)] public float targetHorizontalSpan = 0f;
+        [Tooltip("Optional vertical span for a staggered movement layout. Zero keeps targets on the table.")]
+        [Range(0f, 1.2f)] public float targetVerticalSpan = 0f;
+        [Tooltip("Require controller-ray selection for this block instead of allowing head-gaze fallback.")]
+        public bool disableGazeFallback = false;
         [Range(0f, 10f)] public float timeLimitSeconds = 0f;
         [Range(0f, 1f)] public float successThresholdStrictness = 0f;
         [Range(0f, 1.5f)] public float feedbackDelaySeconds = 0f;
@@ -78,6 +84,8 @@ public partial class XRWorkloadProbeSceneController : MonoBehaviour
         public int distractorCount;
         public float targetDistance;
         public float targetSize;
+        public float targetHorizontalSpan;
+        public float targetVerticalSpan;
         public float timeLimit;
         public float successThresholdStrictness;
         public float effectiveSelectionCone;
@@ -864,6 +872,8 @@ public partial class XRWorkloadProbeSceneController : MonoBehaviour
             distractorCount = Mathf.Max(1, EffectiveTargetCount(profile) - 1),
             targetDistance = profile.targetDistance,
             targetSize = profile.targetSize,
+            targetHorizontalSpan = EffectiveTargetHorizontalSpan(profile),
+            targetVerticalSpan = EffectiveTargetVerticalSpan(profile),
             timeLimit = profile.timeLimitSeconds,
             successThresholdStrictness = Mathf.Clamp01(profile.successThresholdStrictness),
             effectiveSelectionCone = EffectiveSelectionCone(profile),
@@ -1148,15 +1158,17 @@ public partial class XRWorkloadProbeSceneController : MonoBehaviour
             correctIndex = EnsureColorInLayout(colorIndices, previousColorIndex, correctIndex);
             requiredColor = _colorNames[colorIndices[correctIndex]];
             requiredShape = _shapeNames[correctIndex % _shapeNames.Length];
-            cue = $"Rule: MEMORY. Select the previous correct color: {requiredColor.ToUpperInvariant()}.";
+            cue = "Rule: 1-BACK MEMORY. Select the color that was correct on the previous trial.";
         }
 
         _previousCorrectColor = requiredColor;
         targetLayout = BuildTargetLayoutString(colorIndices, count);
 
         float tableTopY = 0.76f;
-        float visibleWidth = Mathf.Clamp(profile.targetDistance * 1.35f, 2.2f, 4.8f);
-        float targetDepth = Mathf.Clamp(profile.targetDistance, 1.45f, 2.35f);
+        float visibleWidth = EffectiveTargetHorizontalSpan(profile);
+        float verticalSpan = EffectiveTargetVerticalSpan(profile);
+        bool useWideMovementLayout = verticalSpan > 0.001f;
+        float targetDepth = Mathf.Clamp(profile.targetDistance, 1.45f, 3.0f);
         for (int i = 0; i < count; i++)
         {
             float t = count == 1 ? 0.5f : i / (float)(count - 1);
@@ -1168,7 +1180,13 @@ public partial class XRWorkloadProbeSceneController : MonoBehaviour
             target.name = $"ProbeTarget_{i + 1}_{colorName}_{_shapeNames[i % _shapeNames.Length]}";
             target.transform.SetParent(_targetRoot, false);
             target.transform.localScale = Vector3.one * profile.targetSize;
-            float centerY = tableTopY + GetPrimitiveHalfHeight(primitiveType, profile.targetSize) + 0.015f;
+            float minimumCenterY = tableTopY + GetPrimitiveHalfHeight(primitiveType, profile.targetSize) + 0.015f;
+            float centerY = minimumCenterY;
+            if (useWideMovementLayout)
+            {
+                float verticalFactor = i % 3 == 0 ? -0.5f : (i % 3 == 1 ? 0.5f : 0f);
+                centerY = Mathf.Max(minimumCenterY, 1.25f + verticalFactor * verticalSpan);
+            }
             target.transform.localPosition = new Vector3(x, centerY, targetDepth);
             var renderer = target.GetComponent<Renderer>();
             renderer.sharedMaterial = _colorMaterials[colorName];
@@ -1181,6 +1199,19 @@ public partial class XRWorkloadProbeSceneController : MonoBehaviour
                 baseScale = target.transform.localScale
             });
         }
+    }
+
+    float EffectiveTargetHorizontalSpan(ProbeBlockProfile profile)
+    {
+        if (profile != null && profile.targetHorizontalSpan > 0.001f)
+            return Mathf.Clamp(profile.targetHorizontalSpan, 2.2f, 5.2f);
+        float distance = profile == null ? 1.6f : profile.targetDistance;
+        return Mathf.Clamp(distance * 1.35f, 2.2f, 4.8f);
+    }
+
+    float EffectiveTargetVerticalSpan(ProbeBlockProfile profile)
+    {
+        return profile == null ? 0f : Mathf.Clamp(profile.targetVerticalSpan, 0f, 1.2f);
     }
 
     int EffectiveTargetCount(ProbeBlockProfile profile)
@@ -1544,6 +1575,7 @@ public partial class XRWorkloadProbeSceneController : MonoBehaviour
     bool IsGazeFallbackAllowed(ProbeBlockProfile profile)
     {
         return enableGazeFallbackSelection &&
+               (profile == null || !profile.disableGazeFallback) &&
                (profile == null || profile.successThresholdStrictness < 0.75f);
     }
 
@@ -1670,9 +1702,12 @@ public partial class XRWorkloadProbeSceneController : MonoBehaviour
             distractorCount = 4,
             targetDistance = 2.65f,
             targetSize = 0.18f,
+            targetHorizontalSpan = 4.8f,
+            targetVerticalSpan = 0.9f,
+            disableGazeFallback = true,
             successThresholdStrictness = 0.65f,
             trialsPerBlock = 10,
-            rationale = "Farther and smaller targets should increase reaching/pointing demand."
+            rationale = "Widely separated low/high targets require large controller movements across the visual field."
         });
         blockProfiles.Add(new ProbeBlockProfile
         {
@@ -4506,13 +4541,14 @@ public partial class XRWorkloadProbeSceneController : MonoBehaviour
     string BuildTrialCsv()
     {
         var sb = new StringBuilder();
-        sb.AppendLine("participantId,sessionNumber,conditionLabel,taskType,blockId,taskProfileId,targetDimension,presentationOrder,trialIndex,scheduleId,cue,rule,targetLayout,ruleComplexity,targetCount,distractorCount,targetDistance,targetSize,timeLimit,successThresholdStrictness,effectiveSelectionCone,effectiveSelectionAssistRadius,gazeFallbackAllowed,feedbackDelay,controlNoise,decisionRt,timeout,isCorrect,correctHapticPlayed,correctHapticSuppressed,correctIndex,selectedIndex,pointerPath,pointerPeakSpeed,pauseCount,hoverChangeCount");
+        sb.AppendLine("participantId,sessionNumber,conditionLabel,taskType,blockId,taskProfileId,targetDimension,presentationOrder,trialIndex,scheduleId,cue,rule,targetLayout,ruleComplexity,targetCount,distractorCount,targetDistance,targetSize,targetHorizontalSpan,targetVerticalSpan,timeLimit,successThresholdStrictness,effectiveSelectionCone,effectiveSelectionAssistRadius,gazeFallbackAllowed,feedbackDelay,controlNoise,decisionRt,timeout,isCorrect,correctHapticPlayed,correctHapticSuppressed,correctIndex,selectedIndex,pointerPath,pointerPeakSpeed,pauseCount,hoverChangeCount");
         foreach (TrialRecord r in _trialRecords)
         {
             sb.AppendLine(string.Join(",",
                 Csv(participantId), I(sessionNumber), Csv(EffectiveConditionLabel()), Csv(r.blockId), Csv(r.blockId), Csv(r.taskProfileId), Csv(r.targetDimension), r.presentationOrder, r.trialIndex,
                 Csv(r.scheduleId), Csv(r.cue), Csv(r.rule), Csv(r.targetLayout), r.ruleComplexity,
-                r.targetCount, r.distractorCount, F(r.targetDistance), F(r.targetSize), F(r.timeLimit),
+                r.targetCount, r.distractorCount, F(r.targetDistance), F(r.targetSize),
+                F(r.targetHorizontalSpan), F(r.targetVerticalSpan), F(r.timeLimit),
                 F(r.successThresholdStrictness), F(r.effectiveSelectionCone), F(r.effectiveSelectionAssistRadius),
                 r.gazeFallbackAllowed ? "1" : "0", F(r.feedbackDelay), F(r.controlNoise),
                 F(r.decisionRt), r.timeout ? "1" : "0", r.isCorrect ? "1" : "0",
@@ -4526,7 +4562,7 @@ public partial class XRWorkloadProbeSceneController : MonoBehaviour
     string BuildBlockCsv()
     {
         var sb = new StringBuilder();
-        sb.AppendLine("participantId,sessionNumber,conditionLabel,taskType,blockId,taskProfileId,targetDimension,presentationOrder,ruleComplexity,targetCount,distractorCount,targetDistance,targetSize,timeLimit,successThresholdStrictness,effectiveSelectionCone,effectiveSelectionAssistRadius,gazeFallbackAllowed,feedbackDelay,controlNoise,trials,accuracy,meanDecisionRt,timeoutCount,meanPointerPath,meanPeakSpeed,totalPauseCount,totalHoverChangeCount");
+        sb.AppendLine("participantId,sessionNumber,conditionLabel,taskType,blockId,taskProfileId,targetDimension,presentationOrder,ruleComplexity,targetCount,distractorCount,targetDistance,targetSize,targetHorizontalSpan,targetVerticalSpan,timeLimit,successThresholdStrictness,effectiveSelectionCone,effectiveSelectionAssistRadius,gazeFallbackAllowed,feedbackDelay,controlNoise,trials,accuracy,meanDecisionRt,timeoutCount,meanPointerPath,meanPeakSpeed,totalPauseCount,totalHoverChangeCount");
         List<ProbeBlockProfile> summaryOrder = _runOrderUsed.Count > 0 ? _runOrderUsed : blockProfiles;
         foreach (ProbeBlockProfile profile in summaryOrder)
         {
@@ -4558,6 +4594,7 @@ public partial class XRWorkloadProbeSceneController : MonoBehaviour
                 Csv(participantId), I(sessionNumber), Csv(EffectiveConditionLabel()), Csv(profile.blockId), Csv(profile.blockId), Csv(EffectiveTaskProfileId(profile)), Csv(profile.targetTlxDimension),
                 I(presentationOrder), Mathf.Clamp(profile.ruleComplexity, 1, 3), EffectiveTargetCount(profile),
                 Mathf.Max(1, EffectiveTargetCount(profile) - 1), F(profile.targetDistance), F(profile.targetSize),
+                F(EffectiveTargetHorizontalSpan(profile)), F(EffectiveTargetVerticalSpan(profile)),
                 F(profile.timeLimitSeconds), F(Mathf.Clamp01(profile.successThresholdStrictness)),
                 F(EffectiveSelectionCone(profile)), F(EffectiveSelectionAssistRadius(profile)),
                 IsGazeFallbackAllowed(profile) ? "1" : "0", F(profile.feedbackDelaySeconds), F(profile.controlNoiseDegrees), n,

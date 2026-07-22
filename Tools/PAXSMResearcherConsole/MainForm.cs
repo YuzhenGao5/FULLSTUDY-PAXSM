@@ -59,6 +59,7 @@ internal sealed class MainForm : Form
     private ResearchSession? _session;
     private DataSnapshot? _snapshot;
     private bool _refreshing;
+    private bool _initialDpiLayoutApplied;
 
     public MainForm(string projectRoot)
     {
@@ -70,7 +71,7 @@ internal sealed class MainForm : Form
         BackColor = Page;
         ForeColor = Ink;
         Font = new Font("Segoe UI", 10F, FontStyle.Regular, GraphicsUnit.Point);
-        AutoScaleMode = AutoScaleMode.Dpi;
+        AutoScaleMode = AutoScaleMode.None;
 
         BuildEntryView();
         BuildConsoleView();
@@ -79,6 +80,39 @@ internal sealed class MainForm : Form
         _refreshTimer = new System.Windows.Forms.Timer { Interval = 2500 };
         _refreshTimer.Tick += async (_, _) => await RefreshDataAsync();
         FormClosed += (_, _) => _refreshTimer.Stop();
+        Shown += (_, _) => ApplyInitialDpiLayout();
+    }
+
+    private void ApplyInitialDpiLayout()
+    {
+        if (_initialDpiLayoutApplied)
+            return;
+        _initialDpiLayoutApplied = true;
+
+        float scale = Math.Max(1f, DeviceDpi / 96f);
+        if (scale > 1.001f)
+        {
+            SuspendLayout();
+            Scale(new SizeF(scale, scale));
+            foreach (ColumnHeader column in _fileList.Columns)
+                column.Width = (int)Math.Round(column.Width * scale);
+            ResumeLayout(true);
+        }
+
+        Rectangle workingArea = Screen.FromControl(this).WorkingArea;
+        int screenMargin = Math.Max(12, (int)Math.Round(16 * scale));
+        int maximumWidth = Math.Max(960, workingArea.Width - screenMargin * 2);
+        int maximumHeight = Math.Max(640, workingArea.Height - screenMargin * 2);
+        MinimumSize = new Size(
+            Math.Min(MinimumSize.Width, maximumWidth),
+            Math.Min(MinimumSize.Height, maximumHeight));
+        int fittedWidth = Math.Min(Width, maximumWidth);
+        int fittedHeight = Math.Min(Height, maximumHeight);
+        Bounds = new Rectangle(
+            workingArea.Left + (workingArea.Width - fittedWidth) / 2,
+            workingArea.Top + (workingArea.Height - fittedHeight) / 2,
+            fittedWidth,
+            fittedHeight);
     }
 
     private void BuildEntryView()
@@ -105,10 +139,10 @@ internal sealed class MainForm : Form
             Padding = new Padding(16)
         };
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
-        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 660));
+        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 700));
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 35));
-        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 520));
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 560));
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 65));
         _entryView.Controls.Add(layout);
 
@@ -120,22 +154,33 @@ internal sealed class MainForm : Form
         };
         layout.Controls.Add(content, 1, 1);
 
+        var introduction = new TableLayoutPanel
+        {
+            Dock = DockStyle.Top,
+            Height = 84,
+            ColumnCount = 1,
+            RowCount = 2,
+            BackColor = Page,
+            Margin = Padding.Empty,
+            Padding = Padding.Empty
+        };
+        introduction.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        introduction.RowStyles.Add(new RowStyle(SizeType.Absolute, 48));
+        introduction.RowStyles.Add(new RowStyle(SizeType.Absolute, 36));
+        content.Controls.Add(introduction);
+
         Label title = CreateLabel("Start a participant session", 24F, Ink, FontStyle.Bold);
-        title.Dock = DockStyle.Top;
-        title.Height = 42;
+        title.Dock = DockStyle.Fill;
         title.TextAlign = ContentAlignment.MiddleCenter;
-        content.Controls.Add(title);
+        introduction.Controls.Add(title, 0, 0);
 
         Label subtitle = CreateLabel(
             "Participant context is required before any scene or data control becomes available.",
             10F,
             Muted);
-        subtitle.Dock = DockStyle.Top;
-        subtitle.Height = 34;
-        subtitle.TextAlign = ContentAlignment.TopCenter;
-        content.Controls.Add(subtitle);
-        subtitle.BringToFront();
-        title.BringToFront();
+        subtitle.Dock = DockStyle.Fill;
+        subtitle.TextAlign = ContentAlignment.MiddleCenter;
+        introduction.Controls.Add(subtitle, 0, 1);
 
         Panel card = CreateCard();
         card.Dock = DockStyle.Bottom;
@@ -154,11 +199,11 @@ internal sealed class MainForm : Form
         form.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 28));
         form.RowStyles.Add(new RowStyle(SizeType.Absolute, 24));
         form.RowStyles.Add(new RowStyle(SizeType.Absolute, 42));
+        form.RowStyles.Add(new RowStyle(SizeType.Absolute, 28));
         form.RowStyles.Add(new RowStyle(SizeType.Absolute, 24));
         form.RowStyles.Add(new RowStyle(SizeType.Absolute, 42));
-        form.RowStyles.Add(new RowStyle(SizeType.Absolute, 24));
-        form.RowStyles.Add(new RowStyle(SizeType.Absolute, 42));
-        form.RowStyles.Add(new RowStyle(SizeType.Absolute, 86));
+        form.RowStyles.Add(new RowStyle(SizeType.Absolute, 10));
+        form.RowStyles.Add(new RowStyle(SizeType.Absolute, 100));
         form.RowStyles.Add(new RowStyle(SizeType.Absolute, 30));
         form.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         card.Controls.Add(form);
@@ -213,9 +258,9 @@ internal sealed class MainForm : Form
         };
         form.Controls.Add(checks, 0, 6);
         form.SetColumnSpan(checks, 2);
-        checks.Controls.Add(CreateReadinessRow("Overwrite protection", "Enabled", 48));
-        checks.Controls.Add(CreateReadinessRow("Unity scene catalogue", "5 scenes ready", 24));
-        checks.Controls.Add(CreateReadinessRow("Study protocol", "Loaded", 0));
+        checks.Controls.Add(CreateReadinessRow("Overwrite protection", "Enabled"));
+        checks.Controls.Add(CreateReadinessRow("Unity scene catalogue", "5 scenes ready"));
+        checks.Controls.Add(CreateReadinessRow("Study protocol", "Loaded"));
 
         _entryError = CreateLabel("", 9F, Error);
         _entryError.Dock = DockStyle.Fill;
@@ -382,7 +427,9 @@ internal sealed class MainForm : Form
         _pipelineBadge.Location = new Point(910, 6);
         _pipelineBadge.Size = new Size(150, 30);
         body.Controls.Add(_pipelineBadge);
-        body.Resize += (_, _) => _pipelineBadge.Left = Math.Max(760, body.ClientSize.Width - 158);
+        body.Resize += (_, _) => _pipelineBadge.Left = Math.Max(
+            subtitle.Right + 12,
+            body.ClientSize.Width - _pipelineBadge.Width);
 
         TableLayoutPanel summaries = new()
         {
@@ -449,7 +496,9 @@ internal sealed class MainForm : Form
         _calibrationProgress.Location = new Point(900, 542);
         _calibrationProgress.Size = new Size(160, 28);
         body.Controls.Add(_calibrationProgress);
-        body.Resize += (_, _) => _calibrationProgress.Left = Math.Max(740, body.ClientSize.Width - 168);
+        body.Resize += (_, _) => _calibrationProgress.Left = Math.Max(
+            blockTitle.Right + 12,
+            body.ClientSize.Width - _calibrationProgress.Width);
 
         Panel blockList = new()
         {
@@ -1015,12 +1064,28 @@ internal sealed class MainForm : Form
         return panel;
     }
 
-    private static Label CreateReadinessRow(string label, string value, int top)
+    private static Control CreateReadinessRow(string label, string value)
     {
-        Label row = CreateLabel($"{label}                                      ✓  {value}", 9F, Ink);
-        row.Dock = DockStyle.Top;
-        row.Height = 24;
-        row.Padding = new Padding(2, 0, 2, 0);
+        var row = new TableLayoutPanel
+        {
+            Dock = DockStyle.Top,
+            Height = 24,
+            ColumnCount = 2,
+            RowCount = 1,
+            BackColor = Color.Transparent,
+            Margin = Padding.Empty,
+            Padding = Padding.Empty
+        };
+        row.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 62));
+        row.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 38));
+        Label name = CreateLabel(label, 9F, Ink);
+        name.Dock = DockStyle.Fill;
+        name.TextAlign = ContentAlignment.MiddleLeft;
+        Label state = CreateLabel($"✓  {value}", 9F, Ink);
+        state.Dock = DockStyle.Fill;
+        state.TextAlign = ContentAlignment.MiddleLeft;
+        row.Controls.Add(name, 0, 0);
+        row.Controls.Add(state, 1, 0);
         return row;
     }
 

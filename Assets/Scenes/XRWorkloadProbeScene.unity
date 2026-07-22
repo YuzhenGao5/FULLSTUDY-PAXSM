@@ -1128,12 +1128,15 @@ MonoBehaviour:
     distractorCount: 4
     targetDistance: 2.65
     targetSize: 0.18
+    targetHorizontalSpan: 4.8
+    targetVerticalSpan: 0.9
+    disableGazeFallback: 1
     timeLimitSeconds: 0
     successThresholdStrictness: 0.65
     feedbackDelaySeconds: 0
     controlNoiseDegrees: 0
     trialsPerBlock: 10
-    rationale: Farther and smaller targets should increase reaching/pointing demand.
+    rationale: Widely separated low/high targets require large controller movements across the visual field.
   - blockId: temporal_heavy
     displayName: Temporal-heavy
     targetTlxDimension: Temporal Demand

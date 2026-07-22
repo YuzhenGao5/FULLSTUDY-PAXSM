@@ -16,6 +16,7 @@ dist/
 # Unity generated files
 *.csproj
 !Tools/PAXSMStudyAgent/PAXSMStudyAgent.csproj
+!Tools/PAXSMResearcherConsole/PAXSMResearcherConsole.csproj
 *.sln
 *.slnx
 *.user
