@@ -202,14 +202,22 @@ MonoBehaviour:
   m_EditorClassIdentifier:
   questionnaireOnlyMode: 1
   requireReadAcknowledgement: 1
-  questionnaireOnlySessionId: standalone_questionnaire
+  questionnaireOnlySessionId: paxsm_personal_knob_reference
+  personalKnobReferenceMode: 1
+  personalReferenceTrialCount: 12
+  personalReferenceMinimumValidTrials: 8
+  personalReferenceMinimumTargetAccuracy: 0.8
+  personalReferenceInstructionSeconds: 6
+  personalReferenceLabel: Personal knob reference
+  personalReferenceDirectPathRatioMax: 1.2
+  personalReferenceLowCorrectionCountMax: 1
   participantId: P001
   sessionNumber: 1
-  conditionLabel: QuestionnaireRead
+  conditionLabel: PAXSMPersonalKnobReference
   randomizeWorkloadBlocks: 0
   startAutomatically: 1
   writeCsvOnQuit: 1
-  outputFolderName: XRQuestionnaireRead_Data
+  outputFolderName: PAXSMPersonalKnobReference_Data
   collectQuestionnaireBetweenBlocks: 1
   useMainSceneKnobRig: 1
   paxsmKnobRigPrefab: {fileID: 0}

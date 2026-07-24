@@ -99,7 +99,7 @@ public sealed class ExperimentSetupController : MonoBehaviour
         _availableScenes.Add(new ExperimentSceneCatalog.SceneEntry(
             "combined-probe", "Combined probe repetition study", "XRCombinedProbeScene", "XRCombinedProbe_Data"));
         _availableScenes.Add(new ExperimentSceneCatalog.SceneEntry(
-            "questionnaire-read", "Questionnaire with Read stage", "XRQuestionnaireReadScene", "XRQuestionnaireRead_Data"));
+            "paxsm-response-calibration", "Personal knob reference calibration", "XRQuestionnaireReadScene", "PAXSMPersonalKnobReference_Data"));
         _availableScenes.Add(new ExperimentSceneCatalog.SceneEntry(
             "paxsm-comparison", "PAXSM comparison study", "PAXSMComparisonScene", "PAXSMComparison_Data"));
     }

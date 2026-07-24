@@ -25,7 +25,7 @@ internal static class Program
             if (!services.TryCreateSession("P888", 1, temporaryRoot, out ResearchSession? session, out _))
                 return 12;
             DataSnapshot snapshot = new DataScanner().Scan(session!);
-            if (snapshot.CalibrationBlocks.Count != 4 ||
+            if (snapshot.CalibrationBlocks.Count != 3 ||
                 snapshot.CalibrationBlocks.Any(block => block.State != CalibrationBlockState.Queued))
                 return 13;
 

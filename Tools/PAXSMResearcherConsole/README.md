@@ -7,7 +7,8 @@ questionnaire, probe, and behavior data.
 The first version provides:
 
 - a mandatory participant/session gate;
-- scene-level launch requests for Comparison, Workload, and Combined;
+- scene-level launch requests for Comparison, Personal knob reference, Workload, and Combined;
+- a participant- and session-bound Personal reference page that displays the Read-calibration profile and its distance-sensitive response-process thresholds;
 - a read-only Workload block monitor based on Unity CSV checkpoints;
 - participant-scoped data summaries and recent-file inspection;
 - a stable entry point for the existing Questionnaire Agent;

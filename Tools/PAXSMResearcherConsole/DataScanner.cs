@@ -52,6 +52,9 @@ internal sealed class DataScanner
         if (workloadRun != null)
             PopulateCalibrationBlocks(blocks, workloadRun.RunDirectory, session.ParticipantId);
 
+        ResponseCalibrationProfileSnapshot responseCalibration =
+            ReadResponseCalibrationProfile(files, session);
+
         return new DataSnapshot
         {
             ParticipantDirectory = participantDirectory,
@@ -66,11 +69,63 @@ internal sealed class DataScanner
                 .OrderBy(block => block.PresentationOrder ?? (block.BlockId == "baseline" ? 0 : 99))
                 .ThenBy(block => Array.FindIndex(ExpectedCalibrationBlocks, item => item.Id == block.BlockId))
                 .ToList(),
+            ResponseCalibration = responseCalibration,
             LatestFiles = files
                 .OrderByDescending(file => file.LastWriteTimeUtc)
                 .Take(30)
                 .ToList()
         };
+    }
+
+    private static ResponseCalibrationProfileSnapshot ReadResponseCalibrationProfile(
+        IEnumerable<FileInfo> files,
+        ResearchSession session)
+    {
+        IEnumerable<FileInfo> candidates = files
+            .Where(file => file.Extension.Equals(".json", StringComparison.OrdinalIgnoreCase) &&
+                           (file.Name.StartsWith("PAXSM_PersonalKnobProfile_", StringComparison.OrdinalIgnoreCase) ||
+                            file.Name.StartsWith("PAXSM_ResponseCalibrationProfile_", StringComparison.OrdinalIgnoreCase)))
+            .OrderByDescending(file => file.Name.Contains("_completed", StringComparison.OrdinalIgnoreCase))
+            .ThenByDescending(file => file.LastWriteTimeUtc);
+
+        foreach (FileInfo file in candidates)
+        {
+            try
+            {
+                using JsonDocument document = JsonDocument.Parse(File.ReadAllText(file.FullName));
+                JsonElement root = document.RootElement;
+                if (!string.Equals(GetString(root, "participantId"), session.ParticipantId, StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                int profileSession = GetInt(root, "sessionNumber");
+                if (profileSession > 0 && profileSession != session.SessionNumber)
+                    continue;
+
+                // New profiles contain one descriptive personal reference. The legacy fallback
+                // preserves access to old pilot exports without treating Quick as a requirement.
+                JsonElement personal = GetObject(root, "personalReference");
+                if (personal.ValueKind != JsonValueKind.Object)
+                    personal = GetObject(root, "carefulReference");
+                return new ResponseCalibrationProfileSnapshot
+                {
+                    Found = true,
+                    Complete = GetBool(root, "calibrationComplete"),
+                    Ready = GetBool(root, "profileReady"),
+                    Quality = GetString(root, "profileQuality"),
+                    ProfilePath = file.FullName,
+                    PersonalTrials = GetInt(personal, "completedTrials"),
+                    PersonalReferenceTrials = GetInt(personal, "referenceTrialCount"),
+                    PersonalAnswerAccuracy = GetFloat(personal, "answerTargetAccuracy"),
+                    PersonalConfidenceAccuracy = GetFloat(personal, "confidenceTargetAccuracy")
+                };
+            }
+            catch
+            {
+                // Keep scanning. A live checkpoint can be atomically replaced while the Console refreshes.
+            }
+        }
+
+        return new ResponseCalibrationProfileSnapshot();
     }
 
     private static List<RunManifestRecord> ReadRunManifests(
@@ -272,12 +327,35 @@ internal sealed class DataScanner
         Array.FindIndex(header, value => value.Trim().Equals(name, StringComparison.OrdinalIgnoreCase));
 
     private static string GetString(JsonElement root, string property) =>
+        root.ValueKind == JsonValueKind.Object &&
         root.TryGetProperty(property, out JsonElement element) && element.ValueKind == JsonValueKind.String
             ? element.GetString() ?? ""
             : "";
 
     private static int GetInt(JsonElement root, string property) =>
+        root.ValueKind == JsonValueKind.Object &&
         root.TryGetProperty(property, out JsonElement element) && element.TryGetInt32(out int value)
             ? value
             : 0;
+
+    private static float GetFloat(JsonElement root, string property)
+    {
+        if (root.ValueKind != JsonValueKind.Object || !root.TryGetProperty(property, out JsonElement element))
+            return 0f;
+        if (element.TryGetSingle(out float single))
+            return single;
+        return element.TryGetDouble(out double number) ? (float)number : 0f;
+    }
+
+    private static bool GetBool(JsonElement root, string property) =>
+        root.ValueKind == JsonValueKind.Object &&
+        root.TryGetProperty(property, out JsonElement element) &&
+        ((element.ValueKind == JsonValueKind.True) ||
+         (element.ValueKind == JsonValueKind.String && bool.TryParse(element.GetString(), out bool value) && value));
+
+    private static JsonElement GetObject(JsonElement root, string property) =>
+        root.ValueKind == JsonValueKind.Object &&
+        root.TryGetProperty(property, out JsonElement element) && element.ValueKind == JsonValueKind.Object
+            ? element
+            : default;
 }

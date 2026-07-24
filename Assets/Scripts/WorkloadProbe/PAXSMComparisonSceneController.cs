@@ -6,6 +6,7 @@ public sealed class PAXSMComparisonSceneController : XRQuestionnaireReadSceneCon
     {
         questionnaireComparisonMode = true;
         questionnaireOnlyMode = true;
+        personalKnobReferenceMode = false;
         requireReadAcknowledgement = true;
         collectQuestionnaireBetweenBlocks = true;
         collectConfidenceAfterEachItem = false;

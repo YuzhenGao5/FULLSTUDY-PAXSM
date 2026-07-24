@@ -122,10 +122,10 @@ public static class ExperimentSetupSceneBuilder
                 "XRCombinedProbeScene",
                 "XRCombinedProbe_Data"),
             new ExperimentSceneCatalog.SceneEntry(
-                "questionnaire-read",
-                "Questionnaire with Read stage",
+                "paxsm-response-calibration",
+                "Personal knob reference calibration",
                 "XRQuestionnaireReadScene",
-                "XRQuestionnaireRead_Data"),
+                "PAXSMPersonalKnobReference_Data"),
             new ExperimentSceneCatalog.SceneEntry(
                 "paxsm-comparison",
                 "PAXSM comparison study",

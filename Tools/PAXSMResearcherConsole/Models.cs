@@ -23,7 +23,14 @@ internal static class SceneDefinitions
         "Workload probe calibration",
         "XRWorkloadProbeScene",
         "XRWorkloadProbe_Data",
-        "Baseline and the three randomized heavy blocks run inside one scene.");
+        "Baseline plus Mental, Physical, and Temporal demand-probe blocks run inside one scene.");
+
+    public static readonly SceneDefinition ResponseCalibration = new(
+        "paxsm-response-calibration",
+        "Personal knob reference calibration",
+        "XRQuestionnaireReadScene",
+        "PAXSMPersonalKnobReference_Data",
+        "One distance-balanced target-entry block creates a participant-relative Answer and Confidence knob profile.");
 
     public static readonly SceneDefinition Combined = new(
         "combined-probe",
@@ -39,15 +46,8 @@ internal static class SceneDefinitions
         "MainScene_Data",
         "General PAXSM questionnaire scene.");
 
-    public static readonly SceneDefinition QuestionnaireRead = new(
-        "questionnaire-read",
-        "Questionnaire with Read stage",
-        "XRQuestionnaireReadScene",
-        "XRQuestionnaireRead_Data",
-        "Questionnaire-only scene with an explicit Read stage.");
-
     public static readonly IReadOnlyList<SceneDefinition> All =
-        new[] { Comparison, Workload, Combined, MainQuestionnaire, QuestionnaireRead };
+        new[] { Comparison, ResponseCalibration, Workload, Combined, MainQuestionnaire };
 }
 
 internal sealed class ResearchSession
@@ -145,6 +145,19 @@ internal sealed class CalibrationBlockSnapshot
     public int QuestionnaireItemCount { get; set; }
 }
 
+internal sealed class ResponseCalibrationProfileSnapshot
+{
+    public bool Found { get; init; }
+    public bool Complete { get; init; }
+    public bool Ready { get; init; }
+    public string Quality { get; init; } = "unavailable";
+    public string ProfilePath { get; init; } = "";
+    public int PersonalTrials { get; init; }
+    public int PersonalReferenceTrials { get; init; }
+    public float PersonalAnswerAccuracy { get; init; }
+    public float PersonalConfidenceAccuracy { get; init; }
+}
+
 internal sealed class DataSnapshot
 {
     public string ParticipantDirectory { get; init; } = "";
@@ -154,7 +167,9 @@ internal sealed class DataSnapshot
     public DateTimeOffset? LatestWriteUtc { get; init; }
     public IReadOnlyList<RunManifestRecord> Runs { get; init; } = Array.Empty<RunManifestRecord>();
     public IReadOnlyList<CalibrationBlockSnapshot> CalibrationBlocks { get; init; } = Array.Empty<CalibrationBlockSnapshot>();
+    public ResponseCalibrationProfileSnapshot ResponseCalibration { get; init; } = new();
     public IReadOnlyList<FileInfo> LatestFiles { get; init; } = Array.Empty<FileInfo>();
     public bool CalibrationComplete =>
         CalibrationBlocks.Count == 4 && CalibrationBlocks.All(block => block.State == CalibrationBlockState.Collected);
+    public bool CalibrationBundleReady => CalibrationComplete && ResponseCalibration.Ready;
 }

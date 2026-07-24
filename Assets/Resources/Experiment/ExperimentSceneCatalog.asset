@@ -28,10 +28,10 @@ MonoBehaviour:
     sceneName: XRCombinedProbeScene
     dataNamespace: XRCombinedProbe_Data
     enabled: 1
-  - id: questionnaire-read
-    displayName: Questionnaire with Read stage
+  - id: paxsm-response-calibration
+    displayName: Personal knob reference calibration
     sceneName: XRQuestionnaireReadScene
-    dataNamespace: XRQuestionnaireRead_Data
+    dataNamespace: PAXSMPersonalKnobReference_Data
     enabled: 1
   - id: paxsm-comparison
     displayName: PAXSM comparison study

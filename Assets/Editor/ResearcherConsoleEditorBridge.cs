@@ -15,6 +15,10 @@ public static class ResearcherConsoleEditorBridge
     {
         EditorApplication.update -= Poll;
         EditorApplication.update += Poll;
+        // Run once immediately after a domain reload as well as on the normal poll.
+        // This prevents a queued Console launch from waiting behind an editor reload.
+        EditorApplication.delayCall -= Poll;
+        EditorApplication.delayCall += Poll;
     }
 
     static void Poll()

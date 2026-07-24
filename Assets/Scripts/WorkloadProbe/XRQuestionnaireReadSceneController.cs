@@ -58,7 +58,6 @@ public class XRQuestionnaireReadSceneController : XRWorkloadProbeSceneController
         questionnaireOnlyMode = true;
         requireReadAcknowledgement = true;
         collectQuestionnaireBetweenBlocks = true;
-        collectConfidenceAfterEachItem = true;
         recordQuestionnairePersonalSpeed = true;
 
         // These offsets apply only to the standalone read scene.
@@ -69,12 +68,25 @@ public class XRQuestionnaireReadSceneController : XRWorkloadProbeSceneController
         questionnaireMinimumHeight = readSceneKnobMinimumHeight;
         questionnaireMaximumHeight = readSceneKnobMaximumHeight;
 
-        if (string.IsNullOrWhiteSpace(conditionLabel))
-            conditionLabel = "QuestionnaireRead";
-        if (string.IsNullOrWhiteSpace(questionnaireOnlySessionId))
-            questionnaireOnlySessionId = "standalone_questionnaire";
-        if (string.IsNullOrWhiteSpace(outputFolderName) || outputFolderName == "XRWorkloadProbe_Data")
-            outputFolderName = "XRQuestionnaireRead_Data";
+        // PAXSMComparisonScene inherits this layout controller. It keeps its own protocol;
+        // only the standalone XRQuestionnaireReadScene becomes the calibration scene.
+        if (!questionnaireComparisonMode)
+        {
+            personalKnobReferenceMode = true;
+            collectConfidenceAfterEachItem = true;
+            questionnaireScale = 21;
+            questionnaireConfidenceScale = 5;
+            personalReferenceTrialCount = 12;
+            personalReferenceMinimumValidTrials = 8;
+            personalReferenceMinimumTargetAccuracy = 0.8f;
+            personalReferenceLabel = "Personal knob reference";
+
+            // This scene is deliberately a target-entry calibration, not a substantive survey.
+            // It supplies participant-relative speed, path, and correction ranges used by the Evidence Matrix X axis.
+            conditionLabel = "PAXSMPersonalKnobReference";
+            questionnaireOnlySessionId = "paxsm_personal_knob_reference";
+            outputFolderName = "PAXSMPersonalKnobReference_Data";
+        }
 
         base.Awake();
     }

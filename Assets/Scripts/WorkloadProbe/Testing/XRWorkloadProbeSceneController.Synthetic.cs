@@ -341,6 +341,15 @@ public partial class XRWorkloadProbeSceneController
         string stageName,
         int scale)
     {
+        // Calibration trials have explicit intended values. Keep the synthetic run exact so
+        // the P4444 walkthrough tests the same export/profile route a real target-entry run uses.
+        if (string.Equals(stageName, "Answer", StringComparison.OrdinalIgnoreCase) &&
+            record.expectedAnswerTarget > 0)
+            return Mathf.Clamp(record.expectedAnswerTarget, 1, scale);
+        if (string.Equals(stageName, "Confidence", StringComparison.OrdinalIgnoreCase) &&
+            record.expectedConfidenceTarget > 0)
+            return Mathf.Clamp(record.expectedConfidenceTarget, 1, scale);
+
         if (string.Equals(stageName, "Confidence", StringComparison.OrdinalIgnoreCase))
             return Mathf.Clamp(2 + ((record.itemIndex + _blockIndex) % 3), 1, scale);
 

@@ -13,6 +13,11 @@ metatest/
 tmp/
 dist/
 
+# Local .NET application builds and single-file releases
+Tools/**/bin/
+Tools/**/obj/
+Tools/**/Release/
+
 # Unity generated files
 *.csproj
 !Tools/PAXSMStudyAgent/PAXSMStudyAgent.csproj

@@ -5,6 +5,7 @@ using System.Globalization;
 using System.IO;
 using System.Text;
 using UnityEngine;
+using UnityEngine.Serialization;
 using UnityEngine.XR;
 #if ENABLE_INPUT_SYSTEM
 using InputSystemKeyboard = UnityEngine.InputSystem.Keyboard;
@@ -130,6 +131,15 @@ public partial class XRWorkloadProbeSceneController : MonoBehaviour
         public bool performanceLike;
     }
 
+    class ResponseCalibrationCondition
+    {
+        public string id = "";
+        public string displayName = "";
+        public string instruction = "";
+        public int[] answerTargets = Array.Empty<int>();
+        public int[] confidenceTargets = Array.Empty<int>();
+    }
+
     class QuestionnaireMotionStats
     {
         public float stageStartTime;
@@ -181,6 +191,7 @@ public partial class XRWorkloadProbeSceneController : MonoBehaviour
     {
         public string blockId = "";
         public string targetDimension = "";
+        public string calibrationCondition = "";
         public int presentationOrder;
         public int itemIndex;
         public string itemId = "";
@@ -192,6 +203,20 @@ public partial class XRWorkloadProbeSceneController : MonoBehaviour
         public int scale;
         public int selectedScore;
         public int confidence;
+        public int expectedAnswerTarget = -1;
+        public int expectedConfidenceTarget = -1;
+        public int answerInitialSlot = -1;
+        public int confidenceInitialSlot = -1;
+        public int answerTargetDistanceSlots = -1;
+        public int confidenceTargetDistanceSlots = -1;
+        public string answerTargetDistanceBin = "";
+        public string confidenceTargetDistanceBin = "";
+        public float answerShortestRequiredAngle = -1f;
+        public float confidenceShortestRequiredAngle = -1f;
+        public int answerTargetError = -1;
+        public int confidenceTargetError = -1;
+        public float answerPathRatio = -1f;
+        public float confidencePathRatio = -1f;
         public float readRt = -1f;
         public float readEnterRealtime = -1f;
         public float readExitRealtime = -1f;
@@ -323,6 +348,25 @@ public partial class XRWorkloadProbeSceneController : MonoBehaviour
     public bool questionnaireOnlyMode = false;
     public bool requireReadAcknowledgement = false;
     public string questionnaireOnlySessionId = "standalone_questionnaire";
+
+    [Header("Personal Knob Reference")]
+    [Tooltip("Runs one distance-balanced target-entry reference block instead of a substantive questionnaire. The exported profile describes this participant's normal knob-motion range for researcher-facing review cues; it never labels a response as careless.")]
+    [FormerlySerializedAs("responseProcessCalibrationMode")]
+    public bool personalKnobReferenceMode = false;
+    [FormerlySerializedAs("responseCalibrationTrialsPerCondition")]
+    [Range(8, 24)] public int personalReferenceTrialCount = 12;
+    [FormerlySerializedAs("responseCalibrationMinimumReferenceTrials")]
+    [Range(4, 20)] public int personalReferenceMinimumValidTrials = 8;
+    [FormerlySerializedAs("responseCalibrationMinimumTargetAccuracy")]
+    [Range(0.5f, 1f)] public float personalReferenceMinimumTargetAccuracy = 0.8f;
+    [FormerlySerializedAs("responseCalibrationInstructionSeconds")]
+    [Range(2f, 12f)] public float personalReferenceInstructionSeconds = 6f;
+    [FormerlySerializedAs("responseCalibrationCarefulLabel")]
+    public string personalReferenceLabel = "Personal knob reference";
+    [FormerlySerializedAs("responseCalibrationDirectPathRatioMax")]
+    [Range(1.05f, 1.5f)] public float personalReferenceDirectPathRatioMax = 1.2f;
+    [FormerlySerializedAs("responseCalibrationLowCorrectionCountMax")]
+    [Range(0, 4)] public int personalReferenceLowCorrectionCountMax = 1;
 
     public string participantId = "P001";
     [Range(1, 99)] public int sessionNumber = 2;
@@ -660,6 +704,12 @@ public partial class XRWorkloadProbeSceneController : MonoBehaviour
             yield break;
         }
 
+        if (personalKnobReferenceMode)
+        {
+            yield return RunPersonalKnobReferenceExperiment();
+            yield break;
+        }
+
         _blockIndex = 0;
         _runBlockCount = 1;
         var questionnaireSession = new ProbeBlockProfile
@@ -681,6 +731,312 @@ public partial class XRWorkloadProbeSceneController : MonoBehaviour
             _timerText.text = "";
         _feedbackText.text = "";
         ClearTargets();
+    }
+
+    IEnumerator RunPersonalKnobReferenceExperiment()
+    {
+        _blockIndex = 0;
+        _runBlockCount = 1;
+        ResponseCalibrationCondition reference = BuildPersonalKnobReferenceSchedule();
+
+        _titleText.text = "Personal Knob Reference";
+        _cueText.text =
+            "You will complete short target-entry trials using the same Answer and Confidence knobs used in the study.";
+        _statusText.text =
+            "This records your own normal knob-motion range. It does not label your responses or judge your effort.";
+        _timerText.text = "";
+        _feedbackText.text = "";
+        ClearTargets();
+        yield return WaitForSecondsOrN(3f);
+
+        yield return RunPersonalKnobReferencePractice(reference);
+        yield return ShowPersonalKnobReferenceInstruction(reference);
+        yield return RunPersonalKnobReferenceBlock(reference);
+
+        WriteCsvFiles("completed");
+        _titleText.text = "Personal Reference Complete";
+        _cueText.text = _lastDataIntegrityPassed
+            ? "Your personal Answer and Confidence knob-reference profile has been saved."
+            : "The reference data were saved, but the profile is not ready. Please ask the researcher to review the integrity report.";
+        _statusText.text = _lastDataIntegrityPassed
+            ? $"DATA COMPLETE: saved {_questionnaireRecords.Count} formal reference trials and a profile to:\n{GetOutputFolder()}"
+            : $"PROFILE NEEDS REVIEW. See:\n{_lastDataIntegrityPath}";
+        _timerText.text = "";
+        _feedbackText.text = "";
+        ClearTargets();
+    }
+
+    IEnumerator ShowPersonalKnobReferenceInstruction(ResponseCalibrationCondition condition)
+    {
+        if (_questionnaireRuntimeRoot != null)
+            _questionnaireRuntimeRoot.gameObject.SetActive(false);
+
+        _titleText.text = condition.displayName;
+        _cueText.text = condition.instruction;
+        _statusText.text =
+            $"{personalReferenceTrialCount} formal target-entry trials follow two excluded practice trials. Press A when ready, or wait to continue.";
+        _timerText.text = "";
+        _feedbackText.text = "";
+        ClearTargets();
+        yield return WaitForSecondsOrN(personalReferenceInstructionSeconds);
+    }
+
+    IEnumerator RunPersonalKnobReferencePractice(ResponseCalibrationCondition condition)
+    {
+        ClearTargets();
+        CalibrateQuestionnairePlacementFromHead();
+        SetQuestionnaireJumpSuppressed(true);
+        _questionnaireActive = true;
+        _questionnaireRuntimeRoot.gameObject.SetActive(true);
+        if (_selectionRayRenderer != null)
+            _selectionRayRenderer.enabled = false;
+
+        var profile = new ProbeBlockProfile
+        {
+            blockId = "personal_reference_practice",
+            displayName = "Practice",
+            targetTlxDimension = "personal_knob_reference"
+        };
+
+        int[] practiceIndices = { 0, Mathf.Min(7, condition.answerTargets.Length - 1) };
+        for (int i = 0; i < practiceIndices.Length; i++)
+        {
+            int source = practiceIndices[i];
+            int answerTarget = condition.answerTargets[source];
+            int confidenceTarget = condition.confidenceTargets[source];
+
+            yield return RunQuestionnaireSelectionStage(
+                profile,
+                $"Practice Answer  {i + 1}/{practiceIndices.Length}",
+                $"Set the Answer dial to {answerTarget}.",
+                "1",
+                questionnaireScale.ToString(CultureInfo.InvariantCulture),
+                questionnaireScale,
+                "PRACTICE - NOT SAVED",
+                false,
+                new QuestionnaireMotionStats(),
+                null,
+                "PracticeAnswer");
+
+            yield return RunQuestionnaireSelectionStage(
+                profile,
+                $"Practice Confidence  {i + 1}/{practiceIndices.Length}",
+                $"Set the Confidence dial to {confidenceTarget}.",
+                "1",
+                questionnaireConfidenceScale.ToString(CultureInfo.InvariantCulture),
+                questionnaireConfidenceScale,
+                "PRACTICE - NOT SAVED",
+                true,
+                new QuestionnaireMotionStats(),
+                null,
+                "PracticeConfidence");
+        }
+
+        ClearQuestionnaireTicks();
+        _questionnaireRuntimeRoot.gameObject.SetActive(false);
+        _questionnaireActive = false;
+        _questionnaireStageActive = false;
+        SetQuestionnaireJumpSuppressed(false);
+    }
+
+    IEnumerator RunPersonalKnobReferenceBlock(ResponseCalibrationCondition condition)
+    {
+        ClearTargets();
+        CalibrateQuestionnairePlacementFromHead();
+        SetQuestionnaireJumpSuppressed(true);
+        _questionnaireActive = true;
+        _questionnaireRuntimeRoot.gameObject.SetActive(true);
+        if (_selectionRayRenderer != null)
+            _selectionRayRenderer.enabled = false;
+
+        _titleText.text = "";
+        _cueText.text = "";
+        _statusText.text = "";
+        _timerText.text = "";
+        _feedbackText.text = "";
+
+        int trialCount = Mathf.Min(condition.answerTargets.Length, condition.confidenceTargets.Length);
+        var profile = new ProbeBlockProfile
+        {
+            blockId = condition.id,
+            displayName = condition.displayName,
+            targetTlxDimension = "personal_knob_reference"
+        };
+
+        for (int trialIndex = 0; trialIndex < trialCount; trialIndex++)
+        {
+            int answerTarget = condition.answerTargets[trialIndex];
+            int confidenceTarget = condition.confidenceTargets[trialIndex];
+            var record = new QuestionnaireRecord
+            {
+                blockId = condition.id,
+                targetDimension = "personal_knob_reference",
+                calibrationCondition = condition.id,
+                presentationOrder = 1,
+                itemIndex = trialIndex + 1,
+                itemId = $"{condition.id}_{trialIndex + 1:00}",
+                itemDimension = "Personal target-entry reference",
+                prompt = $"Set the Answer dial to {answerTarget}.",
+                leftAnchor = "1",
+                rightAnchor = questionnaireScale.ToString(CultureInfo.InvariantCulture),
+                responseMode = CurrentQuestionnaireResponseMode(),
+                scale = questionnaireScale,
+                expectedAnswerTarget = answerTarget,
+                expectedConfidenceTarget = confidenceTarget
+            };
+
+            if (requireReadAcknowledgement)
+            {
+                string readPrompt =
+                    $"For the next target-entry trial, set the Answer dial to {answerTarget}. " +
+                    "Then set the Confidence dial to the displayed target.";
+                yield return RunQuestionnaireReadStage(
+                    $"Read  {trialIndex + 1}/{trialCount}",
+                    readPrompt,
+                    "1",
+                    questionnaireScale.ToString(CultureInfo.InvariantCulture),
+                    questionnaireScale,
+                    record);
+            }
+
+            var answerStats = new QuestionnaireMotionStats();
+            yield return RunQuestionnaireSelectionStage(
+                profile,
+                $"Answer target  {trialIndex + 1}/{trialCount}",
+                $"Set the Answer dial to {answerTarget}.",
+                "1",
+                questionnaireScale.ToString(CultureInfo.InvariantCulture),
+                questionnaireScale,
+                condition.displayName,
+                false,
+                answerStats,
+                record,
+                "Answer");
+
+            record.selectedScore = _questionnaireSelectedValue;
+            record.answerRt = answerStats.duration;
+            record.answerConfirmHoldRt = answerStats.confirmHoldDuration;
+            record.answerDecisionRt = Mathf.Max(0f, answerStats.duration - answerStats.confirmHoldDuration);
+            record.answerFirstInteractionRt = answerStats.firstInteractionRt;
+            record.answerEnterRealtime = answerStats.stageStartTime;
+            record.answerExitRealtime = answerStats.stageEndTime;
+            record.answerConfirmAttemptCount = answerStats.confirmAttemptCount;
+            record.answerConfirmCancelCount = answerStats.confirmCancelCount;
+            record.answerGrabCount = answerStats.grabCount;
+            record.answerTargetError = Mathf.Abs(record.selectedScore - answerTarget);
+            CopyQuestionnaireStats(answerStats, record, answerStage: true);
+            record.answerPathRatio = CalculateCalibrationPathRatio(record, answerStage: true);
+            PopulatePersonalReferenceDistanceFields(record, answerStage: true);
+
+            var confidenceStats = new QuestionnaireMotionStats();
+            yield return RunQuestionnaireSelectionStage(
+                profile,
+                $"Confidence target  {trialIndex + 1}/{trialCount}",
+                $"Set the Confidence dial to {confidenceTarget}. This is a target-entry movement, not a confidence judgment.",
+                "1",
+                questionnaireConfidenceScale.ToString(CultureInfo.InvariantCulture),
+                questionnaireConfidenceScale,
+                condition.displayName,
+                true,
+                confidenceStats,
+                record,
+                "Confidence");
+
+            record.confidence = _questionnaireSelectedValue;
+            record.confidenceRt = confidenceStats.duration;
+            record.confidenceConfirmHoldRt = confidenceStats.confirmHoldDuration;
+            record.confidenceDecisionRt = Mathf.Max(0f, confidenceStats.duration - confidenceStats.confirmHoldDuration);
+            record.confidenceFirstInteractionRt = confidenceStats.firstInteractionRt;
+            record.confidenceEnterRealtime = confidenceStats.stageStartTime;
+            record.confidenceExitRealtime = confidenceStats.stageEndTime;
+            record.confidenceConfirmAttemptCount = confidenceStats.confirmAttemptCount;
+            record.confidenceConfirmCancelCount = confidenceStats.confirmCancelCount;
+            record.confidenceGrabCount = confidenceStats.grabCount;
+            record.confidenceTargetError = Mathf.Abs(record.confidence - confidenceTarget);
+            CopyQuestionnaireStats(confidenceStats, record, answerStage: false);
+            record.confidencePathRatio = CalculateCalibrationPathRatio(record, answerStage: false);
+            PopulatePersonalReferenceDistanceFields(record, answerStage: false);
+
+            _questionnaireRecords.Add(record);
+            if (IsQuestionnaireKnobInputActive)
+                AppendMainSceneCompatibleSummaries(record);
+            WriteQuestionnaireLiveCheckpoint();
+            yield return new WaitForSeconds(0.2f);
+        }
+
+        ClearQuestionnaireTicks();
+        _questionnaireTitleText.text = "Personal reference complete";
+        _questionnairePromptText.text = "Your formal Answer and Confidence movements have been recorded.";
+        _questionnaireScaleText.text = "";
+        _questionnaireScaleRightText.text = "";
+        _questionnaireProgressText.text = "";
+        _questionnaireValueText.text = "";
+        yield return WaitForSecondsOrN(1.25f);
+
+        _questionnaireRuntimeRoot.gameObject.SetActive(false);
+        _questionnaireActive = false;
+        _questionnaireStageActive = false;
+        SetQuestionnaireJumpSuppressed(false);
+        if (_selectionRayRenderer != null)
+            _selectionRayRenderer.enabled = false;
+    }
+
+    ResponseCalibrationCondition BuildPersonalKnobReferenceSchedule()
+    {
+        int count = Mathf.Clamp(personalReferenceTrialCount, 8, 24);
+        return new ResponseCalibrationCondition
+        {
+            id = "personal_reference",
+            displayName = string.IsNullOrWhiteSpace(personalReferenceLabel)
+                ? "Personal knob reference"
+                : personalReferenceLabel.Trim(),
+            instruction =
+                "Use the knob naturally and accurately. Targets vary in direction and travel distance so the system can learn your own normal movement range.",
+            answerTargets = BuildPersonalReferenceTargets(questionnaireScale, count),
+            confidenceTargets = BuildPersonalReferenceTargets(questionnaireConfidenceScale, count)
+        };
+    }
+
+    public static int[] BuildPersonalReferenceTargets(int scale, int count)
+    {
+        int boundedScale = Mathf.Max(2, scale);
+        int centeredSlot = Mathf.CeilToInt(boundedScale * 0.5f);
+        int maxBalancedDistance = Mathf.Max(1, Mathf.Min(centeredSlot - 1, boundedScale - centeredSlot));
+        int[] offsets;
+        if (boundedScale == 21)
+        {
+            // Short, medium, and long moves are balanced across both directions from slot 11.
+            offsets = new[] { -1, 1, -2, 2, -4, 4, -5, 5, -8, 8, -10, 10 };
+        }
+        else if (boundedScale == 5)
+        {
+            // A five-point Confidence dial has only one short and one long distance from slot 3.
+            offsets = new[] { -1, 1, -1, 1, -1, 1, -2, 2, -2, 2, -2, 2 };
+        }
+        else
+        {
+            int shortDistance = Mathf.Min(1, maxBalancedDistance);
+            int mediumDistance = Mathf.Clamp(Mathf.RoundToInt(maxBalancedDistance * 0.55f), shortDistance, maxBalancedDistance);
+            offsets = new[]
+            {
+                -shortDistance, shortDistance, -shortDistance, shortDistance,
+                -mediumDistance, mediumDistance, -mediumDistance, mediumDistance,
+                -maxBalancedDistance, maxBalancedDistance, -maxBalancedDistance, maxBalancedDistance
+            };
+        }
+
+        var targets = new int[Mathf.Max(1, count)];
+        for (int i = 0; i < targets.Length; i++)
+        {
+            int offset = offsets[i % offsets.Length];
+            if ((i / offsets.Length) % 2 == 1)
+                offset = -offset;
+            int target = Mathf.Clamp(centeredSlot + offset, 1, boundedScale);
+            if (target == centeredSlot)
+                target = Mathf.Clamp(target + (i % 2 == 0 ? -1 : 1), 1, boundedScale);
+            targets[i] = target;
+        }
+        return targets;
     }
 
     List<ProbeBlockProfile> BuildRunOrder()
@@ -2006,6 +2362,11 @@ public partial class XRWorkloadProbeSceneController : MonoBehaviour
                 record.answerConfirmCancelCount = answerStats.confirmCancelCount;
                 record.answerGrabCount = answerStats.grabCount;
                 CopyQuestionnaireStats(answerStats, record, answerStage: true);
+                record.answerPathRatio = CalculateObservedPathRatio(
+                    record.answerInitialSlot,
+                    record.selectedScore,
+                    record.answerTotalAbsAngle,
+                    questionnaireScale);
 
                 if (collectConfidenceAfterEachItem)
                 {
@@ -2034,6 +2395,11 @@ public partial class XRWorkloadProbeSceneController : MonoBehaviour
                     record.confidenceConfirmCancelCount = confidenceStats.confirmCancelCount;
                     record.confidenceGrabCount = confidenceStats.grabCount;
                     CopyQuestionnaireStats(confidenceStats, record, answerStage: false);
+                    record.confidencePathRatio = CalculateObservedPathRatio(
+                        record.confidenceInitialSlot,
+                        record.confidence,
+                        record.confidenceTotalAbsAngle,
+                        questionnaireConfidenceScale);
                 }
                 else
                 {
@@ -2400,6 +2766,15 @@ public partial class XRWorkloadProbeSceneController : MonoBehaviour
         _questionnaireSelectedValue = -1;
         _questionnaireHoverValue = pointAndClick ? -1 : Mathf.CeilToInt(scale * 0.5f);
         SetupQuestionnaireScale(scale);
+        if (!pointAndClick && _paxsmQuestionnaireKnobCore != null)
+            _questionnaireHoverValue = _paxsmQuestionnaireKnobCore.CurrentSlot;
+        if (record != null)
+        {
+            if (string.Equals(stageName, "Answer", StringComparison.OrdinalIgnoreCase))
+                record.answerInitialSlot = _questionnaireHoverValue;
+            else if (string.Equals(stageName, "Confidence", StringComparison.OrdinalIgnoreCase))
+                record.confidenceInitialSlot = _questionnaireHoverValue;
+        }
         UpdateQuestionnaireTickVisuals(_questionnaireHoverValue, _questionnaireSelectedValue);
 
         _questionnaireTitleText.text = title;
@@ -4160,7 +4535,13 @@ public partial class XRWorkloadProbeSceneController : MonoBehaviour
             savedPaths.Add(speedSummaryPath);
         }
 
-        if (_mainSceneMergedExporter != null &&
+        WriteResponseCalibrationArtifacts(folder, stamp, reason, savedPaths);
+
+        // The legacy merged exporter owns its own subfolder convention. Console-configured
+        // CARE-XR runs use the unified ExperimentRunContext paths above instead.
+        if (!personalKnobReferenceMode &&
+            !ExperimentRunContext.IsConfigured &&
+            _mainSceneMergedExporter != null &&
             _mainSceneAnswerExportMirror != null &&
             _mainSceneAnswerExportMirror.summaries.Count > 0)
         {
@@ -4189,6 +4570,796 @@ public partial class XRWorkloadProbeSceneController : MonoBehaviour
         Debug.Log($"[XRWorkloadProbe] Saved logs:\n{string.Join("\n", savedPaths)}", this);
         if (string.Equals(reason, "completed", StringComparison.OrdinalIgnoreCase))
             _completedExportWritten = true;
+    }
+
+    // Target-entry calibration uses the same knob instrumentation as a substantive item,
+    // while keeping the intended target explicit so that the personal reference remains auditable.
+    float CalculateCalibrationPathRatio(QuestionnaireRecord record, bool answerStage)
+    {
+        if (record == null)
+            return -1f;
+
+        int scale = answerStage ? Mathf.Max(2, record.scale) : Mathf.Max(2, questionnaireConfidenceScale);
+        int target = answerStage ? record.expectedAnswerTarget : record.expectedConfidenceTarget;
+        int initial = answerStage ? record.answerInitialSlot : record.confidenceInitialSlot;
+        float totalAbsAngle = answerStage ? record.answerTotalAbsAngle : record.confidenceTotalAbsAngle;
+        if (target < 1 || initial < 1 || totalAbsAngle < 0f)
+            return -1f;
+
+        float shortestRequiredAngle = CalculateShortestRequiredAngle(initial, target, scale);
+        float oneSlotAngle = Mathf.Abs(QuestionnaireKnobMaxAngle() - QuestionnaireKnobMinAngle()) /
+                             Mathf.Max(1f, scale - 1f);
+        if (shortestRequiredAngle <= 0.0001f)
+            return totalAbsAngle <= oneSlotAngle * 0.5f
+                ? 1f
+                : totalAbsAngle / Mathf.Max(0.0001f, oneSlotAngle);
+
+        return totalAbsAngle / shortestRequiredAngle;
+    }
+
+    float CalculateObservedPathRatio(int initialSlot, int finalSlot, float totalAbsAngle, int scale)
+    {
+        if (initialSlot < 1 || finalSlot < 1 || totalAbsAngle < 0f)
+            return -1f;
+
+        float shortestRequiredAngle = CalculateShortestRequiredAngle(initialSlot, finalSlot, scale);
+        float oneSlotAngle = Mathf.Abs(QuestionnaireKnobMaxAngle() - QuestionnaireKnobMinAngle()) /
+                             Mathf.Max(1f, Mathf.Max(2, scale) - 1f);
+        if (shortestRequiredAngle <= 0.0001f)
+            return totalAbsAngle <= oneSlotAngle * 0.5f
+                ? 1f
+                : totalAbsAngle / Mathf.Max(0.0001f, oneSlotAngle);
+
+        return totalAbsAngle / shortestRequiredAngle;
+    }
+
+    float CalculateShortestRequiredAngle(int initialSlot, int targetSlot, int scale)
+    {
+        int boundedScale = Mathf.Max(2, scale);
+        return Mathf.Abs(
+            SlotAngle(targetSlot, boundedScale, QuestionnaireKnobMinAngle(), QuestionnaireKnobMaxAngle()) -
+            SlotAngle(initialSlot, boundedScale, QuestionnaireKnobMinAngle(), QuestionnaireKnobMaxAngle()));
+    }
+
+    void PopulatePersonalReferenceDistanceFields(QuestionnaireRecord record, bool answerStage)
+    {
+        if (record == null)
+            return;
+
+        int scale = answerStage ? Mathf.Max(2, record.scale) : Mathf.Max(2, questionnaireConfidenceScale);
+        int initial = answerStage ? record.answerInitialSlot : record.confidenceInitialSlot;
+        int target = answerStage ? record.expectedAnswerTarget : record.expectedConfidenceTarget;
+        int distanceSlots = initial > 0 && target > 0 ? Mathf.Abs(target - initial) : -1;
+        string distanceBin = GetPersonalReferenceDistanceBin(scale, distanceSlots);
+        float shortestAngle = distanceSlots >= 0
+            ? CalculateShortestRequiredAngle(initial, target, scale)
+            : -1f;
+
+        if (answerStage)
+        {
+            record.answerTargetDistanceSlots = distanceSlots;
+            record.answerTargetDistanceBin = distanceBin;
+            record.answerShortestRequiredAngle = shortestAngle;
+        }
+        else
+        {
+            record.confidenceTargetDistanceSlots = distanceSlots;
+            record.confidenceTargetDistanceBin = distanceBin;
+            record.confidenceShortestRequiredAngle = shortestAngle;
+        }
+    }
+
+    public static string GetPersonalReferenceDistanceBin(int scale, int slotDistance)
+    {
+        if (slotDistance < 0)
+            return "unknown";
+        if (slotDistance == 0)
+            return "zero";
+        if (scale <= 5)
+            return slotDistance <= 1 ? "short" : "long";
+
+        int centeredSlot = Mathf.CeilToInt(Mathf.Max(2, scale) * 0.5f);
+        int maximumDistance = Mathf.Max(1, Mathf.Min(centeredSlot - 1, Mathf.Max(2, scale) - centeredSlot));
+        int shortMaximum = Mathf.Max(1, Mathf.RoundToInt(maximumDistance * 0.2f));
+        int mediumMaximum = Mathf.Max(shortMaximum + 1, Mathf.RoundToInt(maximumDistance * 0.6f));
+        if (slotDistance <= shortMaximum)
+            return "short";
+        if (slotDistance <= mediumMaximum)
+            return "medium";
+        return "long";
+    }
+
+    void WriteResponseCalibrationArtifacts(
+        string folder,
+        string stamp,
+        string reason,
+        List<string> savedPaths)
+    {
+        if (!personalKnobReferenceMode)
+            return;
+
+        PAXSMResponseCalibrationProfile profile = BuildResponseCalibrationProfile(reason);
+        string suffix = $"{participantId}_{stamp}_{reason}";
+        string trialsPath = Path.Combine(folder, $"PAXSM_PersonalKnobReferenceTrials_{suffix}.csv");
+        string profileJsonPath = Path.Combine(folder, $"PAXSM_PersonalKnobProfile_{suffix}.json");
+        string profileCsvPath = Path.Combine(folder, $"PAXSM_PersonalKnobProfile_{suffix}.csv");
+        string integrityPath = Path.Combine(folder, $"PAXSM_PersonalKnobReferenceIntegrity_{suffix}.csv");
+        WriteCheckpointFile(trialsPath, BuildResponseCalibrationTrialsCsv());
+        WriteCheckpointFile(profileJsonPath, JsonUtility.ToJson(profile, true));
+        WriteCheckpointFile(profileCsvPath, BuildResponseCalibrationProfileCsv(profile));
+        WriteCheckpointFile(
+            integrityPath,
+            BuildPersonalKnobReferenceIntegrityCsv(
+                profile,
+                reason,
+                folder,
+                stamp,
+                trialsPath,
+                profileJsonPath,
+                profileCsvPath));
+        savedPaths.Add(trialsPath);
+        savedPaths.Add(profileJsonPath);
+        savedPaths.Add(profileCsvPath);
+        savedPaths.Add(integrityPath);
+        _lastDataIntegrityPath = integrityPath;
+    }
+
+    PAXSMResponseCalibrationProfile BuildResponseCalibrationProfile(string reason)
+    {
+        var profile = new PAXSMResponseCalibrationProfile
+        {
+            participantId = participantId,
+            sessionNumber = sessionNumber,
+            sourceScene = gameObject.scene.name,
+            runId = ExperimentRunContext.RunId,
+            generatedUtc = DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture),
+            completionReason = reason ?? "",
+            expectedTrials = Mathf.Clamp(personalReferenceTrialCount, 8, 24),
+            minimumReferenceTrials = Mathf.Max(4, personalReferenceMinimumValidTrials),
+            minimumTargetAccuracy = Mathf.Clamp01(personalReferenceMinimumTargetAccuracy),
+            minimumValidSlotEvents = Mathf.Max(1, questionnaireCalibrationMinimumSlotEvents),
+            minimumValidPhysicalSamples = Mathf.Max(1, questionnaireCalibrationMinimumPhysicalSamples),
+            personalReference = BuildResponseCalibrationConditionSummary(
+                "personal_reference", personalReferenceLabel)
+        };
+
+        profile.calibrationComplete =
+            string.Equals(reason, "completed", StringComparison.OrdinalIgnoreCase) &&
+            profile.personalReference.completedTrials >= profile.expectedTrials;
+
+        int personalSlotEvents = profile.personalReference.answer.validSlotSpeedEventCount +
+                                 profile.personalReference.confidence.validSlotSpeedEventCount;
+        int personalPhysicalSamples = profile.personalReference.answer.validPhysicalSpeedSampleCount +
+                                      profile.personalReference.confidence.validPhysicalSpeedSampleCount;
+        bool enoughReferenceTrials =
+            profile.personalReference.referenceTrialCount >= profile.minimumReferenceTrials;
+        bool enoughAccuracy =
+            profile.personalReference.answerTargetAccuracy >= profile.minimumTargetAccuracy &&
+            profile.personalReference.confidenceTargetAccuracy >= profile.minimumTargetAccuracy;
+        bool enoughInstrumentation =
+            personalSlotEvents >= profile.minimumValidSlotEvents &&
+            personalPhysicalSamples >= profile.minimumValidPhysicalSamples;
+
+        profile.profileReady = profile.calibrationComplete && enoughReferenceTrials &&
+                               enoughAccuracy && enoughInstrumentation;
+        profile.profileQuality = profile.profileReady
+            ? "ready"
+            : profile.calibrationComplete ? "limited" : "insufficient";
+        profile.calibrationNotes =
+            "This profile is a descriptive reference for this participant's normal Answer and Confidence knob movements. " +
+            "It defines personal ranges for speed, path, pauses, reversals, micro-adjustments, and corrections across movement-distance bins. " +
+            "Any later pattern match remains a researcher-facing review cue linked to raw item and stage records, not a careless-response label.";
+
+        PAXSMResponsePatternThresholds thresholds = profile.responsePatternThresholds;
+        thresholds.directPathRatioMax = personalReferenceDirectPathRatioMax;
+        thresholds.lowCorrectionCountMax = personalReferenceLowCorrectionCountMax;
+        thresholds.answerFastDecisionRtBelowSec = -1f;
+        thresholds.confidenceFastDecisionRtBelowSec = -1f;
+        thresholds.answerHighMaxAbsVelocityAbove = profile.personalReference.answer.maxAbsVelocity.p90;
+        thresholds.confidenceHighMaxAbsVelocityAbove = profile.personalReference.confidence.maxAbsVelocity.p90;
+        thresholds.answerHighPhysicalAngularSpeedAboveDps =
+            profile.personalReference.answer.physicalAngularSpeed.p90;
+        thresholds.confidenceHighPhysicalAngularSpeedAboveDps =
+            profile.personalReference.confidence.physicalAngularSpeed.p90;
+        thresholds.answerExtraPathRatioAbove = profile.personalReference.answer.pathRatio.upperReference;
+        thresholds.confidenceExtraPathRatioAbove = profile.personalReference.confidence.pathRatio.upperReference;
+        thresholds.answerHighCorrectionRateAbove = profile.personalReference.answer.correctionRate.upperReference;
+        thresholds.confidenceHighCorrectionRateAbove = profile.personalReference.confidence.correctionRate.upperReference;
+        thresholds.answerLowCorrectionRateAtOrBelow = profile.personalReference.answer.correctionRate.p25;
+        thresholds.confidenceLowCorrectionRateAtOrBelow = profile.personalReference.confidence.correctionRate.p25;
+        return profile;
+    }
+
+    string BuildPersonalKnobReferenceIntegrityCsv(
+        PAXSMResponseCalibrationProfile profile,
+        string reason,
+        string folder,
+        string stamp,
+        string trialsPath,
+        string profileJsonPath,
+        string profileCsvPath)
+    {
+        int expectedTrials = Mathf.Clamp(personalReferenceTrialCount, 8, 24);
+        int formalRecords = 0;
+        int answerCorrect = 0;
+        int confidenceCorrect = 0;
+        int readRows = 0;
+        for (int i = 0; i < _questionnaireRecords.Count; i++)
+        {
+            QuestionnaireRecord record = _questionnaireRecords[i];
+            if (record == null ||
+                !string.Equals(record.calibrationCondition, "personal_reference", StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            formalRecords++;
+            if (record.answerTargetError == 0)
+                answerCorrect++;
+            if (record.confidenceTargetError == 0)
+                confidenceCorrect++;
+            if (record.readRt >= 0f)
+                readRows++;
+        }
+
+        int stageEvents = CountPersonalReferenceRows(_questionnaireStageEvents, row => row.blockId);
+        int rawTraceRows = CountPersonalReferenceRows(_questionnaireRawTraceRecords, row => row.blockId);
+        int interactionRows = CountPersonalReferenceRows(_questionnaireInteractionEvents, row => row.blockId);
+        int physicalSpeedRows = CountPersonalReferenceRows(_questionnairePhysicalSpeedSamples, row => row.blockId);
+        int slotSpeedRows = CountPersonalReferenceRows(_questionnaireSlotSpeedEvents, row => row.blockId);
+        int minimumStageEvents = expectedTrials * (requireReadAcknowledgement ? 8 : 6);
+        int minimumRawTraceRows = expectedTrials * 4;
+        int minimumInteractionRows = expectedTrials * 8;
+        bool completed = string.Equals(reason, "completed", StringComparison.OrdinalIgnoreCase);
+        bool rawFilesWritten = File.Exists(trialsPath) && File.Exists(profileJsonPath) && File.Exists(profileCsvPath);
+        bool enoughRawEvents = rawTraceRows >= minimumRawTraceRows && interactionRows >= minimumInteractionRows;
+        bool speedObserved = physicalSpeedRows > 0 && slotSpeedRows > 0;
+
+        var rows = new List<string>();
+        bool allRequiredChecksPass = true;
+        void AddCheck(string checkId, string expected, string observed, bool pass, string note)
+        {
+            if (!pass)
+                allRequiredChecksPass = false;
+            rows.Add(string.Join(",", new[]
+            {
+                Csv(participantId), I(sessionNumber), Csv(EffectiveConditionLabel()), Csv(reason),
+                Csv(checkId), "1", Csv(expected), Csv(observed),
+                Csv(pass ? "PASS" : "FAIL"), Csv(note)
+            }));
+        }
+
+        AddCheck("run_completion", "completed", reason, completed,
+            "The personal-reference protocol must end through the normal completion path.");
+        AddCheck("formal_target_entry_trials", I(expectedTrials), I(formalRecords), formalRecords == expectedTrials,
+            "Two practice trials are intentionally excluded; only the formal target-entry trials count here.");
+        AddCheck("answer_target_accuracy", $">={F(personalReferenceMinimumTargetAccuracy)}", F(profile.personalReference.answerTargetAccuracy),
+            profile.personalReference.answerTargetAccuracy >= personalReferenceMinimumTargetAccuracy,
+            "Answer target accuracy is required before using Answer-stage personal reference values.");
+        AddCheck("confidence_target_accuracy", $">={F(personalReferenceMinimumTargetAccuracy)}", F(profile.personalReference.confidenceTargetAccuracy),
+            profile.personalReference.confidenceTargetAccuracy >= personalReferenceMinimumTargetAccuracy,
+            "Confidence target accuracy is required before using Confidence-stage personal reference values.");
+        AddCheck("valid_reference_trials", $">={I(personalReferenceMinimumValidTrials)}", I(profile.personalReference.referenceTrialCount),
+            profile.personalReference.referenceTrialCount >= personalReferenceMinimumValidTrials,
+            "A valid reference trial requires correct Answer and Confidence target entry.");
+        AddCheck("read_stage_rows", I(expectedTrials), I(readRows), readRows == expectedTrials,
+            "Every formal reference trial must contain a Read-stage acknowledgement.");
+        AddCheck("stage_events", $">={I(minimumStageEvents)}", I(stageEvents), stageEvents >= minimumStageEvents,
+            "Stage Enter, Confirm, and Exit events must be available for Read, Answer, and Confidence.");
+        AddCheck("raw_trace_anchors", $">={I(minimumRawTraceRows)}", I(rawTraceRows), rawTraceRows >= minimumRawTraceRows,
+            "Raw traces retain at least the start and end anchors for Answer and Confidence on each trial.");
+        AddCheck("interaction_events", $">={I(minimumInteractionRows)}", I(interactionRows), interactionRows >= minimumInteractionRows,
+            "Interaction events retain grabbing, first movement, confirmation, and stage-transition evidence.");
+        AddCheck("physical_speed_samples", ">0", I(physicalSpeedRows), physicalSpeedRows > 0,
+            "Wrist-twist angular-speed samples are required for participant-relative speed calibration.");
+        AddCheck("slot_speed_events", ">0", I(slotSpeedRows), slotSpeedRows > 0,
+            "Detent/slot transition-speed events are required for participant-relative speed calibration.");
+        AddCheck("profile_artifacts", "3", rawFilesWritten ? "3" : "missing file", rawFilesWritten,
+            "The trial table, JSON profile, and analysis-friendly profile CSV must all be present.");
+        AddCheck("profile_ready", "true", B(profile.profileReady), profile.profileReady,
+            "Only a ready profile should supply participant-relative Evidence Matrix thresholds.");
+
+        var sb = new StringBuilder();
+        sb.AppendLine(
+            "participantId,sessionNumber,conditionLabel,reason,checkId,required,expected,observed,status,note");
+        sb.AppendLine(string.Join(",", new[]
+        {
+            Csv(participantId), I(sessionNumber), Csv(EffectiveConditionLabel()), Csv(reason),
+            Csv("overall"), "1", Csv("all required checks PASS"),
+            Csv(allRequiredChecksPass ? "all required checks PASS" : "one or more required checks FAIL"),
+            Csv(allRequiredChecksPass ? "PASS" : "FAIL"),
+            Csv("Do not use a failed personal profile to set participant-relative response-process thresholds.")
+        }));
+        for (int i = 0; i < rows.Count; i++)
+            sb.AppendLine(rows[i]);
+
+        _lastDataIntegrityPassed = allRequiredChecksPass;
+        return sb.ToString();
+    }
+
+    int CountPersonalReferenceRows<T>(IList<T> rows, Func<T, string> getBlockId)
+    {
+        int count = 0;
+        if (rows == null || getBlockId == null)
+            return count;
+        for (int i = 0; i < rows.Count; i++)
+        {
+            T row = rows[i];
+            if (row != null && string.Equals(getBlockId(row), "personal_reference", StringComparison.OrdinalIgnoreCase))
+                count++;
+        }
+        return count;
+    }
+
+    PAXSMCalibrationConditionSummary BuildResponseCalibrationConditionSummary(
+        string conditionId,
+        string instructionLabel)
+    {
+        var allRecords = new List<QuestionnaireRecord>();
+        var referenceRecords = new List<QuestionnaireRecord>();
+        int answerCorrect = 0;
+        int confidenceCorrect = 0;
+        for (int i = 0; i < _questionnaireRecords.Count; i++)
+        {
+            QuestionnaireRecord record = _questionnaireRecords[i];
+            if (record == null ||
+                !string.Equals(record.calibrationCondition, conditionId, StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            allRecords.Add(record);
+            bool answerIsCorrect = record.expectedAnswerTarget > 0 && record.answerTargetError == 0;
+            bool confidenceIsCorrect = record.expectedConfidenceTarget > 0 && record.confidenceTargetError == 0;
+            if (answerIsCorrect)
+                answerCorrect++;
+            if (confidenceIsCorrect)
+                confidenceCorrect++;
+            if (answerIsCorrect && confidenceIsCorrect)
+                referenceRecords.Add(record);
+        }
+
+        int completed = allRecords.Count;
+        return new PAXSMCalibrationConditionSummary
+        {
+            conditionId = conditionId,
+            instructionLabel = string.IsNullOrWhiteSpace(instructionLabel) ? conditionId : instructionLabel.Trim(),
+            completedTrials = completed,
+            answerTargetCorrect = answerCorrect,
+            confidenceTargetCorrect = confidenceCorrect,
+            referenceTrialCount = referenceRecords.Count,
+            answerTargetAccuracy = completed > 0 ? answerCorrect / (float)completed : 0f,
+            confidenceTargetAccuracy = completed > 0 ? confidenceCorrect / (float)completed : 0f,
+            readRt = PAXSMCalibrationStatistics.CreateReference(
+                "read_rt", "seconds", CollectCalibrationValues(referenceRecords, "read_rt"), 0.15f),
+            answer = BuildResponseCalibrationStageSummary(referenceRecords, true),
+            confidence = BuildResponseCalibrationStageSummary(referenceRecords, false)
+        };
+    }
+
+    PAXSMCalibrationStageSummary BuildResponseCalibrationStageSummary(
+        List<QuestionnaireRecord> referenceRecords,
+        bool answerStage)
+    {
+        string stage = answerStage ? "Answer" : "Confidence";
+        var summary = new PAXSMCalibrationStageSummary
+        {
+            referenceTrialCount = referenceRecords.Count,
+            validSlotSpeedEventCount = CountCalibrationSlotSpeedEvents(referenceRecords, stage),
+            validPhysicalSpeedSampleCount = CountCalibrationPhysicalSpeedSamples(referenceRecords, stage)
+        };
+
+        summary.decisionRt = PAXSMCalibrationStatistics.CreateReference(
+            "decision_rt", "seconds", CollectCalibrationValues(referenceRecords, answerStage, "decision_rt"), 0.15f);
+        summary.firstInteractionRt = PAXSMCalibrationStatistics.CreateReference(
+            "first_interaction_rt", "seconds", CollectCalibrationValues(referenceRecords, answerStage, "first_interaction_rt"), 0.1f);
+        summary.maxAbsVelocity = PAXSMCalibrationStatistics.CreateReference(
+            "max_abs_velocity", "degrees_per_second", CollectCalibrationValues(referenceRecords, answerStage, "max_abs_velocity"), 5f);
+        summary.maxFlickVelocity = PAXSMCalibrationStatistics.CreateReference(
+            "max_flick_velocity", "degrees_per_second", CollectCalibrationValues(referenceRecords, answerStage, "max_flick_velocity"), 5f);
+        summary.physicalAngularSpeed = PAXSMCalibrationStatistics.CreateReference(
+            "physical_angular_speed", "degrees_per_second", CollectCalibrationPhysicalSpeedValues(referenceRecords, stage), 5f);
+        summary.totalAbsAngle = PAXSMCalibrationStatistics.CreateReference(
+            "total_abs_angle", "degrees", CollectCalibrationValues(referenceRecords, answerStage, "total_abs_angle"), 5f);
+        summary.pathRatio = PAXSMCalibrationStatistics.CreateReference(
+            "path_ratio", "ratio", CollectCalibrationValues(referenceRecords, answerStage, "path_ratio"), 0.05f);
+        summary.slotChangeCount = PAXSMCalibrationStatistics.CreateReference(
+            "slot_change_count", "count", CollectCalibrationValues(referenceRecords, answerStage, "slot_change_count"), 0.25f);
+        summary.pauseCount = PAXSMCalibrationStatistics.CreateReference(
+            "pause_count", "count", CollectCalibrationValues(referenceRecords, answerStage, "pause_count"), 0.25f);
+        summary.pauseRate = PAXSMCalibrationStatistics.CreateReference(
+            "pause_rate", "count_per_second", CollectCalibrationValues(referenceRecords, answerStage, "pause_rate"), 0.05f);
+        summary.reverseCount = PAXSMCalibrationStatistics.CreateReference(
+            "reverse_count", "count", CollectCalibrationValues(referenceRecords, answerStage, "reverse_count"), 0.25f);
+        summary.microAdjustCount = PAXSMCalibrationStatistics.CreateReference(
+            "micro_adjust_count", "count", CollectCalibrationValues(referenceRecords, answerStage, "micro_adjust_count"), 0.25f);
+        summary.correctionRate = PAXSMCalibrationStatistics.CreateReference(
+            "correction_rate", "corrections_per_slot_change", CollectCalibrationValues(referenceRecords, answerStage, "correction_rate"), 0.05f);
+        summary.fastFlickCount = PAXSMCalibrationStatistics.CreateReference(
+            "fast_flick_count", "count", CollectCalibrationValues(referenceRecords, answerStage, "fast_flick_count"), 0.25f);
+        summary.grabCount = PAXSMCalibrationStatistics.CreateReference(
+            "grab_count", "count", CollectCalibrationValues(referenceRecords, answerStage, "grab_count"), 0.25f);
+        summary.confirmCancelCount = PAXSMCalibrationStatistics.CreateReference(
+            "confirm_cancel_count", "count", CollectCalibrationValues(referenceRecords, answerStage, "confirm_cancel_count"), 0.25f);
+        summary.distanceBins = BuildPersonalReferenceDistanceBins(referenceRecords, answerStage);
+        return summary;
+    }
+
+    List<PAXSMCalibrationDistanceBinSummary> BuildPersonalReferenceDistanceBins(
+        List<QuestionnaireRecord> referenceRecords,
+        bool answerStage)
+    {
+        var summaries = new List<PAXSMCalibrationDistanceBinSummary>();
+        int scale = answerStage
+            ? Mathf.Max(2, referenceRecords.Count > 0 ? referenceRecords[0].scale : questionnaireScale)
+            : Mathf.Max(2, questionnaireConfidenceScale);
+        string[] bins = { "short", "medium", "long" };
+        for (int i = 0; i < bins.Length; i++)
+        {
+            GetPersonalReferenceDistanceBinBounds(scale, bins[i], out int minimum, out int maximum);
+            if (minimum > maximum)
+                continue;
+
+            var binRecords = new List<QuestionnaireRecord>();
+            for (int recordIndex = 0; recordIndex < referenceRecords.Count; recordIndex++)
+            {
+                QuestionnaireRecord record = referenceRecords[recordIndex];
+                string recordBin = answerStage ? record.answerTargetDistanceBin : record.confidenceTargetDistanceBin;
+                if (string.Equals(recordBin, bins[i], StringComparison.OrdinalIgnoreCase))
+                    binRecords.Add(record);
+            }
+            if (binRecords.Count == 0)
+                continue;
+
+            summaries.Add(new PAXSMCalibrationDistanceBinSummary
+            {
+                binId = bins[i],
+                displayName = $"{bins[i]} target movement",
+                minimumSlotDistance = minimum,
+                maximumSlotDistance = maximum,
+                referenceTrialCount = binRecords.Count,
+                decisionRt = PAXSMCalibrationStatistics.CreateReference(
+                    "decision_rt", "seconds", CollectCalibrationValues(binRecords, answerStage, "decision_rt"), 0.15f),
+                firstInteractionRt = PAXSMCalibrationStatistics.CreateReference(
+                    "first_interaction_rt", "seconds", CollectCalibrationValues(binRecords, answerStage, "first_interaction_rt"), 0.1f),
+                maxAbsVelocity = PAXSMCalibrationStatistics.CreateReference(
+                    "max_abs_velocity", "degrees_per_second", CollectCalibrationValues(binRecords, answerStage, "max_abs_velocity"), 5f),
+                maxFlickVelocity = PAXSMCalibrationStatistics.CreateReference(
+                    "max_flick_velocity", "degrees_per_second", CollectCalibrationValues(binRecords, answerStage, "max_flick_velocity"), 5f),
+                totalAbsAngle = PAXSMCalibrationStatistics.CreateReference(
+                    "total_abs_angle", "degrees", CollectCalibrationValues(binRecords, answerStage, "total_abs_angle"), 5f),
+                pathRatio = PAXSMCalibrationStatistics.CreateReference(
+                    "path_ratio", "ratio", CollectCalibrationValues(binRecords, answerStage, "path_ratio"), 0.05f),
+                pauseRate = PAXSMCalibrationStatistics.CreateReference(
+                    "pause_rate", "count_per_second", CollectCalibrationValues(binRecords, answerStage, "pause_rate"), 0.05f),
+                reverseCount = PAXSMCalibrationStatistics.CreateReference(
+                    "reverse_count", "count", CollectCalibrationValues(binRecords, answerStage, "reverse_count"), 0.25f),
+                microAdjustCount = PAXSMCalibrationStatistics.CreateReference(
+                    "micro_adjust_count", "count", CollectCalibrationValues(binRecords, answerStage, "micro_adjust_count"), 0.25f),
+                correctionRate = PAXSMCalibrationStatistics.CreateReference(
+                    "correction_rate", "corrections_per_slot_change", CollectCalibrationValues(binRecords, answerStage, "correction_rate"), 0.05f),
+                fastFlickCount = PAXSMCalibrationStatistics.CreateReference(
+                    "fast_flick_count", "count", CollectCalibrationValues(binRecords, answerStage, "fast_flick_count"), 0.25f)
+            });
+        }
+        return summaries;
+    }
+
+    static void GetPersonalReferenceDistanceBinBounds(
+        int scale,
+        string bin,
+        out int minimum,
+        out int maximum)
+    {
+        minimum = 1;
+        maximum = 0;
+        if (scale <= 5)
+        {
+            if (string.Equals(bin, "short", StringComparison.OrdinalIgnoreCase))
+            {
+                minimum = 1;
+                maximum = 1;
+            }
+            else if (string.Equals(bin, "long", StringComparison.OrdinalIgnoreCase))
+            {
+                minimum = 2;
+                maximum = Mathf.Max(1, Mathf.Min(
+                    Mathf.CeilToInt(Mathf.Max(2, scale) * 0.5f) - 1,
+                    Mathf.Max(2, scale) - Mathf.CeilToInt(Mathf.Max(2, scale) * 0.5f)));
+            }
+            return;
+        }
+
+        int centeredSlot = Mathf.CeilToInt(Mathf.Max(2, scale) * 0.5f);
+        int maxDistance = Mathf.Max(1, Mathf.Min(centeredSlot - 1, Mathf.Max(2, scale) - centeredSlot));
+        int shortMaximum = Mathf.Max(1, Mathf.RoundToInt(maxDistance * 0.2f));
+        int mediumMaximum = Mathf.Max(shortMaximum + 1, Mathf.RoundToInt(maxDistance * 0.6f));
+        if (string.Equals(bin, "short", StringComparison.OrdinalIgnoreCase))
+        {
+            minimum = 1;
+            maximum = shortMaximum;
+        }
+        else if (string.Equals(bin, "medium", StringComparison.OrdinalIgnoreCase))
+        {
+            minimum = shortMaximum + 1;
+            maximum = Mathf.Min(maxDistance, mediumMaximum);
+        }
+        else if (string.Equals(bin, "long", StringComparison.OrdinalIgnoreCase))
+        {
+            minimum = mediumMaximum + 1;
+            maximum = maxDistance;
+        }
+    }
+
+    List<float> CollectCalibrationValues(List<QuestionnaireRecord> records, string metric)
+    {
+        var values = new List<float>();
+        for (int i = 0; i < records.Count; i++)
+        {
+            if (string.Equals(metric, "read_rt", StringComparison.OrdinalIgnoreCase))
+                values.Add(records[i].readRt);
+        }
+        return values;
+    }
+
+    List<float> CollectCalibrationValues(List<QuestionnaireRecord> records, bool answerStage, string metric)
+    {
+        var values = new List<float>();
+        for (int i = 0; i < records.Count; i++)
+        {
+            QuestionnaireRecord record = records[i];
+            float decisionRt = answerStage ? record.answerDecisionRt : record.confidenceDecisionRt;
+            float firstInteractionRt = answerStage ? record.answerFirstInteractionRt : record.confidenceFirstInteractionRt;
+            float maxVelocity = answerStage ? record.answerMaxAbsVel : record.confidenceMaxAbsVel;
+            float maxFlickVelocity = answerStage
+                ? (record.answerMetrics?.maxFlickVel ?? -1f)
+                : (record.confidenceMetrics?.maxFlickVel ?? -1f);
+            float totalAbsAngle = answerStage ? record.answerTotalAbsAngle : record.confidenceTotalAbsAngle;
+            float pathRatio = answerStage ? record.answerPathRatio : record.confidencePathRatio;
+            int slotChanges = answerStage ? record.answerSlotChangeCount : record.confidenceSlotChangeCount;
+            int pauses = answerStage ? record.answerPauseCount : record.confidencePauseCount;
+            int reverses = answerStage ? record.answerReverseCount : record.confidenceReverseCount;
+            int microAdjustments = answerStage ? record.answerMicroAdjustCount : record.confidenceMicroAdjustCount;
+            int fastFlicks = answerStage ? record.answerFastFlickCount : record.confidenceFastFlickCount;
+            int grabs = answerStage ? record.answerGrabCount : record.confidenceGrabCount;
+            int confirmCancels = answerStage ? record.answerConfirmCancelCount : record.confidenceConfirmCancelCount;
+            float value = -1f;
+
+            if (string.Equals(metric, "decision_rt", StringComparison.OrdinalIgnoreCase)) value = decisionRt;
+            else if (string.Equals(metric, "first_interaction_rt", StringComparison.OrdinalIgnoreCase)) value = firstInteractionRt;
+            else if (string.Equals(metric, "max_abs_velocity", StringComparison.OrdinalIgnoreCase)) value = maxVelocity;
+            else if (string.Equals(metric, "max_flick_velocity", StringComparison.OrdinalIgnoreCase)) value = maxFlickVelocity;
+            else if (string.Equals(metric, "total_abs_angle", StringComparison.OrdinalIgnoreCase)) value = totalAbsAngle;
+            else if (string.Equals(metric, "path_ratio", StringComparison.OrdinalIgnoreCase)) value = pathRatio;
+            else if (string.Equals(metric, "slot_change_count", StringComparison.OrdinalIgnoreCase)) value = slotChanges;
+            else if (string.Equals(metric, "pause_count", StringComparison.OrdinalIgnoreCase)) value = pauses;
+            else if (string.Equals(metric, "pause_rate", StringComparison.OrdinalIgnoreCase))
+                value = PAXSMCalibrationStatistics.Rate(pauses, decisionRt);
+            else if (string.Equals(metric, "reverse_count", StringComparison.OrdinalIgnoreCase)) value = reverses;
+            else if (string.Equals(metric, "micro_adjust_count", StringComparison.OrdinalIgnoreCase)) value = microAdjustments;
+            else if (string.Equals(metric, "correction_rate", StringComparison.OrdinalIgnoreCase))
+                value = (reverses + microAdjustments) / Mathf.Max(1f, slotChanges);
+            else if (string.Equals(metric, "fast_flick_count", StringComparison.OrdinalIgnoreCase)) value = fastFlicks;
+            else if (string.Equals(metric, "grab_count", StringComparison.OrdinalIgnoreCase)) value = grabs;
+            else if (string.Equals(metric, "confirm_cancel_count", StringComparison.OrdinalIgnoreCase)) value = confirmCancels;
+            values.Add(value);
+        }
+        return values;
+    }
+
+    List<float> CollectCalibrationPhysicalSpeedValues(List<QuestionnaireRecord> records, string stage)
+    {
+        var values = new List<float>();
+        for (int i = 0; i < _questionnairePhysicalSpeedSamples.Count; i++)
+        {
+            QuestionnairePhysicalSpeedSample sample = _questionnairePhysicalSpeedSamples[i];
+            if (!sample.validForCalibration || sample.physicalAngularSpeedDps < 0f)
+                continue;
+            if (CalibrationSpeedSampleMatchesAnyRecord(sample, records, stage))
+                values.Add(sample.physicalAngularSpeedDps);
+        }
+        return values;
+    }
+
+    int CountCalibrationPhysicalSpeedSamples(List<QuestionnaireRecord> records, string stage)
+    {
+        int count = 0;
+        for (int i = 0; i < _questionnairePhysicalSpeedSamples.Count; i++)
+        {
+            QuestionnairePhysicalSpeedSample sample = _questionnairePhysicalSpeedSamples[i];
+            if (sample.validForCalibration && CalibrationSpeedSampleMatchesAnyRecord(sample, records, stage))
+                count++;
+        }
+        return count;
+    }
+
+    int CountCalibrationSlotSpeedEvents(List<QuestionnaireRecord> records, string stage)
+    {
+        int count = 0;
+        for (int i = 0; i < _questionnaireSlotSpeedEvents.Count; i++)
+        {
+            QuestionnaireSlotSpeedEvent speedEvent = _questionnaireSlotSpeedEvents[i];
+            if (!speedEvent.validForCalibration || speedEvent.slotsPerSecond < 0f)
+                continue;
+            for (int recordIndex = 0; recordIndex < records.Count; recordIndex++)
+            {
+                QuestionnaireRecord record = records[recordIndex];
+                if (CalibrationRecordMatches(
+                        record,
+                        speedEvent.blockId,
+                        speedEvent.presentationOrder,
+                        speedEvent.itemIndex,
+                        speedEvent.itemId,
+                        speedEvent.stage,
+                        stage))
+                {
+                    count++;
+                    break;
+                }
+            }
+        }
+        return count;
+    }
+
+    bool CalibrationSpeedSampleMatchesAnyRecord(
+        QuestionnairePhysicalSpeedSample sample,
+        List<QuestionnaireRecord> records,
+        string stage)
+    {
+        for (int i = 0; i < records.Count; i++)
+        {
+            if (CalibrationRecordMatches(
+                    records[i], sample.blockId, sample.presentationOrder, sample.itemIndex,
+                    sample.itemId, sample.stage, stage))
+                return true;
+        }
+        return false;
+    }
+
+    bool CalibrationRecordMatches(
+        QuestionnaireRecord record,
+        string blockId,
+        int presentationOrder,
+        int itemIndex,
+        string itemId,
+        string recordStage,
+        string requestedStage)
+    {
+        return record != null &&
+               string.Equals(record.blockId, blockId, StringComparison.OrdinalIgnoreCase) &&
+               record.presentationOrder == presentationOrder &&
+               record.itemIndex == itemIndex &&
+               string.Equals(record.itemId, itemId, StringComparison.OrdinalIgnoreCase) &&
+               string.Equals(recordStage, requestedStage, StringComparison.OrdinalIgnoreCase);
+    }
+
+    string BuildResponseCalibrationTrialsCsv()
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine(
+            "participantId,sessionNumber,conditionLabel,calibrationCondition,presentationOrder,itemIndex,itemId," +
+            "expectedAnswerTarget,selectedAnswerTarget,answerTargetError,answerInitialSlot,answerTargetDistanceSlots," +
+            "answerTargetDistanceBin,answerShortestRequiredAngle,answerPathRatio,answerRt,answerDecisionRt," +
+            "answerFirstInteractionRt,answerTotalAbsAngle,answerMaxAbsVel,answerMaxFlickVel,answerSlotChangeCount," +
+            "answerPauseCount,answerPauseRate,answerReverseCount,answerMicroAdjustCount,answerCorrectionRate," +
+            "answerFastFlickCount,answerGrabCount,answerConfirmCancelCount," +
+            "expectedConfidenceTarget,selectedConfidenceTarget,confidenceTargetError,confidenceInitialSlot," +
+            "confidenceTargetDistanceSlots,confidenceTargetDistanceBin,confidenceShortestRequiredAngle,confidencePathRatio," +
+            "confidenceRt,confidenceDecisionRt,confidenceFirstInteractionRt,confidenceTotalAbsAngle,confidenceMaxAbsVel," +
+            "confidenceMaxFlickVel," +
+            "confidenceSlotChangeCount,confidencePauseCount,confidencePauseRate,confidenceReverseCount," +
+            "confidenceMicroAdjustCount,confidenceCorrectionRate,confidenceFastFlickCount,confidenceGrabCount," +
+            "confidenceConfirmCancelCount,readRt");
+
+        for (int i = 0; i < _questionnaireRecords.Count; i++)
+        {
+            QuestionnaireRecord record = _questionnaireRecords[i];
+            if (record == null || string.IsNullOrWhiteSpace(record.calibrationCondition))
+                continue;
+            float answerPauseRate = PAXSMCalibrationStatistics.Rate(record.answerPauseCount, record.answerDecisionRt);
+            float confidencePauseRate = PAXSMCalibrationStatistics.Rate(record.confidencePauseCount, record.confidenceDecisionRt);
+            float answerCorrectionRate = (record.answerReverseCount + record.answerMicroAdjustCount) /
+                                       Mathf.Max(1f, record.answerSlotChangeCount);
+            float confidenceCorrectionRate = (record.confidenceReverseCount + record.confidenceMicroAdjustCount) /
+                                           Mathf.Max(1f, record.confidenceSlotChangeCount);
+            sb.AppendLine(string.Join(",", new[]
+            {
+                Csv(participantId), I(sessionNumber), Csv(EffectiveConditionLabel()), Csv(record.calibrationCondition),
+                I(record.presentationOrder), I(record.itemIndex), Csv(record.itemId),
+                I(record.expectedAnswerTarget), I(record.selectedScore), I(record.answerTargetError),
+                I(record.answerInitialSlot), I(record.answerTargetDistanceSlots), Csv(record.answerTargetDistanceBin),
+                F(record.answerShortestRequiredAngle), F(record.answerPathRatio), F(record.answerRt), F(record.answerDecisionRt),
+                F(record.answerFirstInteractionRt), F(record.answerTotalAbsAngle), F(record.answerMaxAbsVel),
+                F(record.answerMetrics?.maxFlickVel ?? -1f),
+                I(record.answerSlotChangeCount), I(record.answerPauseCount), F(answerPauseRate),
+                I(record.answerReverseCount), I(record.answerMicroAdjustCount), F(answerCorrectionRate),
+                I(record.answerFastFlickCount), I(record.answerGrabCount), I(record.answerConfirmCancelCount),
+                I(record.expectedConfidenceTarget), I(record.confidence), I(record.confidenceTargetError),
+                I(record.confidenceInitialSlot), I(record.confidenceTargetDistanceSlots), Csv(record.confidenceTargetDistanceBin),
+                F(record.confidenceShortestRequiredAngle), F(record.confidencePathRatio), F(record.confidenceRt),
+                F(record.confidenceDecisionRt),
+                F(record.confidenceFirstInteractionRt), F(record.confidenceTotalAbsAngle),
+                F(record.confidenceMaxAbsVel), F(record.confidenceMetrics?.maxFlickVel ?? -1f),
+                I(record.confidenceSlotChangeCount),
+                I(record.confidencePauseCount), F(confidencePauseRate), I(record.confidenceReverseCount),
+                I(record.confidenceMicroAdjustCount), F(confidenceCorrectionRate),
+                I(record.confidenceFastFlickCount), I(record.confidenceGrabCount),
+                I(record.confidenceConfirmCancelCount), F(record.readRt)
+            }));
+        }
+        return sb.ToString();
+    }
+
+    string BuildResponseCalibrationProfileCsv(PAXSMResponseCalibrationProfile profile)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine(
+            "participantId,sessionNumber,profileQuality,profileReady,calibrationComplete,condition,stage,distanceBin," +
+            "minimumSlotDistance,maximumSlotDistance,metric,units,sampleCount,median,mad,robustSigma,p10,p25,p90,p95," +
+            "lowerReference,upperReference");
+        AppendResponseCalibrationProfileRow(sb, profile, "personal_reference", "Read", profile.personalReference.readRt);
+        AppendResponseCalibrationStageRows(sb, profile, "personal_reference", "Answer", profile.personalReference.answer);
+        AppendResponseCalibrationStageRows(sb, profile, "personal_reference", "Confidence", profile.personalReference.confidence);
+        return sb.ToString();
+    }
+
+    void AppendResponseCalibrationStageRows(
+        StringBuilder sb,
+        PAXSMResponseCalibrationProfile profile,
+        string condition,
+        string stage,
+        PAXSMCalibrationStageSummary summary)
+    {
+        AppendResponseCalibrationProfileRow(sb, profile, condition, stage, summary.decisionRt);
+        AppendResponseCalibrationProfileRow(sb, profile, condition, stage, summary.firstInteractionRt);
+        AppendResponseCalibrationProfileRow(sb, profile, condition, stage, summary.maxAbsVelocity);
+        AppendResponseCalibrationProfileRow(sb, profile, condition, stage, summary.maxFlickVelocity);
+        AppendResponseCalibrationProfileRow(sb, profile, condition, stage, summary.physicalAngularSpeed);
+        AppendResponseCalibrationProfileRow(sb, profile, condition, stage, summary.totalAbsAngle);
+        AppendResponseCalibrationProfileRow(sb, profile, condition, stage, summary.pathRatio);
+        AppendResponseCalibrationProfileRow(sb, profile, condition, stage, summary.slotChangeCount);
+        AppendResponseCalibrationProfileRow(sb, profile, condition, stage, summary.pauseCount);
+        AppendResponseCalibrationProfileRow(sb, profile, condition, stage, summary.pauseRate);
+        AppendResponseCalibrationProfileRow(sb, profile, condition, stage, summary.reverseCount);
+        AppendResponseCalibrationProfileRow(sb, profile, condition, stage, summary.microAdjustCount);
+        AppendResponseCalibrationProfileRow(sb, profile, condition, stage, summary.correctionRate);
+        AppendResponseCalibrationProfileRow(sb, profile, condition, stage, summary.fastFlickCount);
+        AppendResponseCalibrationProfileRow(sb, profile, condition, stage, summary.grabCount);
+        AppendResponseCalibrationProfileRow(sb, profile, condition, stage, summary.confirmCancelCount);
+        if (summary.distanceBins == null)
+            return;
+
+        for (int i = 0; i < summary.distanceBins.Count; i++)
+        {
+            PAXSMCalibrationDistanceBinSummary bin = summary.distanceBins[i];
+            AppendResponseCalibrationProfileRow(sb, profile, condition, stage, bin.maxAbsVelocity, bin);
+            AppendResponseCalibrationProfileRow(sb, profile, condition, stage, bin.maxFlickVelocity, bin);
+            AppendResponseCalibrationProfileRow(sb, profile, condition, stage, bin.totalAbsAngle, bin);
+            AppendResponseCalibrationProfileRow(sb, profile, condition, stage, bin.pathRatio, bin);
+            AppendResponseCalibrationProfileRow(sb, profile, condition, stage, bin.pauseRate, bin);
+            AppendResponseCalibrationProfileRow(sb, profile, condition, stage, bin.reverseCount, bin);
+            AppendResponseCalibrationProfileRow(sb, profile, condition, stage, bin.microAdjustCount, bin);
+            AppendResponseCalibrationProfileRow(sb, profile, condition, stage, bin.correctionRate, bin);
+            AppendResponseCalibrationProfileRow(sb, profile, condition, stage, bin.fastFlickCount, bin);
+        }
+    }
+
+    void AppendResponseCalibrationProfileRow(
+        StringBuilder sb,
+        PAXSMResponseCalibrationProfile profile,
+        string condition,
+        string stage,
+        PAXSMCalibrationMetricReference reference,
+        PAXSMCalibrationDistanceBinSummary distanceBin = null)
+    {
+        if (reference == null)
+            return;
+        sb.AppendLine(string.Join(",", new[]
+        {
+            Csv(profile.participantId), I(profile.sessionNumber), Csv(profile.profileQuality), B(profile.profileReady),
+            B(profile.calibrationComplete), Csv(condition), Csv(stage), Csv(distanceBin?.binId ?? "global"),
+            I(distanceBin?.minimumSlotDistance ?? -1), I(distanceBin?.maximumSlotDistance ?? -1),
+            Csv(reference.metric), Csv(reference.units),
+            I(reference.sampleCount), F(reference.median), F(reference.mad), F(reference.robustSigma),
+            F(reference.p10), F(reference.p25), F(reference.p90), F(reference.p95),
+            F(reference.lowerReference), F(reference.upperReference)
+        }));
     }
 
     string BuildWorkloadProbeDataIntegrityCsv(string reason, string folder, string stamp)
@@ -4246,6 +5417,8 @@ public partial class XRWorkloadProbeSceneController : MonoBehaviour
         int mergedFileCount = Directory.Exists(folder)
             ? Directory.GetFiles(folder, "KnobBehavior_Merged_*.csv", SearchOption.AllDirectories).Length
             : 0;
+        bool legacyMergedFileRequired = collectQuestionnaireBetweenBlocks &&
+                                        !ExperimentRunContext.IsConfigured;
 
         var rows = new List<string>();
         bool allRequiredChecksPass = true;
@@ -4378,9 +5551,14 @@ public partial class XRWorkloadProbeSceneController : MonoBehaviour
         AddCheck("main_scene_compatible_rows", I(expectedQuestionnaireRows), I(observedMergedRows),
             observedMergedRows == expectedQuestionnaireRows, collectQuestionnaireBetweenBlocks,
             "Compatibility rows support the existing KnobBehavior_Merged analysis pipeline.");
-        AddCheck("main_scene_compatible_file", ">=1", I(mergedFileCount),
-            mergedFileCount > 0, collectQuestionnaireBetweenBlocks,
-            "The merged compatibility CSV must exist beneath the workload-probe output folder.");
+        AddCheck("main_scene_compatible_file",
+            legacyMergedFileRequired ? ">=1" : "not required for Console-managed CARE-XR runs",
+            I(mergedFileCount),
+            !legacyMergedFileRequired || mergedFileCount > 0,
+            legacyMergedFileRequired,
+            legacyMergedFileRequired
+                ? "The standalone legacy pipeline writes a merged compatibility CSV."
+                : "The unified CAREXR_Questionnaire export already contains the compatibility rows; no duplicate legacy file is written.");
 
         if (requireReadAcknowledgement)
         {
@@ -4653,8 +5831,10 @@ public partial class XRWorkloadProbeSceneController : MonoBehaviour
         var headers = new List<string>
         {
             "participantId", "sessionNumber", "conditionLabel", "schemaVersion", "featureAlgorithmVersion",
-            "taskType", "blockId", "targetDimension", "presentationOrder", "itemIndex", "itemId",
+            "taskType", "blockId", "targetDimension", "calibrationCondition", "presentationOrder", "itemIndex", "itemId",
             "itemDimension", "prompt", "leftAnchor", "rightAnchor", "scale", "responseMode",
+            "expectedAnswerTarget", "expectedConfidenceTarget", "answerInitialSlot", "confidenceInitialSlot",
+            "answerTargetError", "confidenceTargetError", "answerPathRatio", "confidencePathRatio",
             "selectedScore", "confidence", "pauseThresholdSec", "stillThresholdSec",
             "fastFlickThresholdSps", "traceSampleIntervalSec", "speedDeltaMin", "speedDeltaK",
             "speedBandMinimumEpisodes", "microMinimumTransitions", "microMaximumSlotSpan",
@@ -4677,8 +5857,11 @@ public partial class XRWorkloadProbeSceneController : MonoBehaviour
             {
                 Csv(participantId), I(sessionNumber), Csv(EffectiveConditionLabel()), Csv(QuestionnaireSchemaVersion),
                 Csv(EffectiveFeatureAlgorithmVersion()), Csv(r.blockId), Csv(r.blockId), Csv(r.targetDimension),
-                I(r.presentationOrder), I(r.itemIndex), Csv(r.itemId), Csv(r.itemDimension), Csv(r.prompt),
-                Csv(r.leftAnchor), Csv(r.rightAnchor), I(r.scale), Csv(r.responseMode), I(r.selectedScore),
+                Csv(r.calibrationCondition), I(r.presentationOrder), I(r.itemIndex), Csv(r.itemId),
+                Csv(r.itemDimension), Csv(r.prompt), Csv(r.leftAnchor), Csv(r.rightAnchor), I(r.scale),
+                Csv(r.responseMode), I(r.expectedAnswerTarget), I(r.expectedConfidenceTarget),
+                I(r.answerInitialSlot), I(r.confidenceInitialSlot), I(r.answerTargetError),
+                I(r.confidenceTargetError), F(r.answerPathRatio), F(r.confidencePathRatio), I(r.selectedScore),
                 I(r.confidence), F(questionnairePauseThresholdSec), F(questionnaireStillThresholdSec),
                 F(questionnaireFastFlickThresholdSps), F(questionnaireTraceSampleIntervalSec),
                 F(questionnaireSpeedDeltaMin), F(questionnaireSpeedDeltaK), I(questionnaireSpeedBandMinimumEpisodes),
