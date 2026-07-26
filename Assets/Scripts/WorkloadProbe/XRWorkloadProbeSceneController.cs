@@ -377,6 +377,10 @@ public partial class XRWorkloadProbeSceneController : MonoBehaviour
     public bool writeCsvOnQuit = true;
     public string outputFolderName = "XRWorkloadProbe_Data";
 
+    [Header("Input Safety")]
+    [Tooltip("Keeps A-button jump and panel-movement behaviours disabled for the full scene. A remains available for PAXSM read acknowledgement and hold-to-confirm.")]
+    public bool suppressAButtonJumpForEntireExperiment = true;
+
     [Header("Inter-block Confirmation")]
     public bool requireParticipantConfirmationBetweenBlocks = false;
     [TextArea(2, 4)]
@@ -478,6 +482,7 @@ public partial class XRWorkloadProbeSceneController : MonoBehaviour
     readonly List<QuestionnairePhysicalSpeedSample> _questionnairePhysicalSpeedSamples = new List<QuestionnairePhysicalSpeedSample>();
     readonly List<QuestionnaireSlotSpeedEvent> _questionnaireSlotSpeedEvents = new List<QuestionnaireSlotSpeedEvent>();
     readonly List<Behaviour> _questionnaireDisabledJumpBehaviours = new List<Behaviour>();
+    bool _aButtonJumpBehavioursSuppressed;
     readonly List<GameObject> _questionnaireTicks = new List<GameObject>();
     readonly List<GameObject> _questionnaireWallTicks = new List<GameObject>();
     readonly List<GameObject> _questionnairePanelObjects = new List<GameObject>();
@@ -574,6 +579,8 @@ public partial class XRWorkloadProbeSceneController : MonoBehaviour
             BuildDefaultProfilesIfNeeded();
         EnsureProbeBehaviorCollector();
         BuildSceneObjects();
+        if (suppressAButtonJumpForEntireExperiment)
+            SetQuestionnaireJumpSuppressed(true);
     }
 
     void EnsureProbeBehaviorCollector()
@@ -791,6 +798,14 @@ public partial class XRWorkloadProbeSceneController : MonoBehaviour
         if (_selectionRayRenderer != null)
             _selectionRayRenderer.enabled = false;
 
+        // The practice trials use the questionnaire wall. Clear the preceding
+        // calibration introduction so the two independent text layouts do not overlap.
+        _titleText.text = "";
+        _cueText.text = "";
+        _statusText.text = "";
+        _timerText.text = "";
+        _feedbackText.text = "";
+
         var profile = new ProbeBlockProfile
         {
             blockId = "personal_reference_practice",
@@ -805,6 +820,10 @@ public partial class XRWorkloadProbeSceneController : MonoBehaviour
             int answerTarget = condition.answerTargets[source];
             int confidenceTarget = condition.confidenceTargets[source];
 
+#if UNITY_EDITOR
+            if (SyntheticParticipantActive)
+                SetSyntheticQuestionnaireTargetOverride(answerTarget);
+#endif
             yield return RunQuestionnaireSelectionStage(
                 profile,
                 $"Practice Answer  {i + 1}/{practiceIndices.Length}",
@@ -818,6 +837,10 @@ public partial class XRWorkloadProbeSceneController : MonoBehaviour
                 null,
                 "PracticeAnswer");
 
+#if UNITY_EDITOR
+            if (SyntheticParticipantActive)
+                SetSyntheticQuestionnaireTargetOverride(confidenceTarget);
+#endif
             yield return RunQuestionnaireSelectionStage(
                 profile,
                 $"Practice Confidence  {i + 1}/{practiceIndices.Length}",
@@ -2475,17 +2498,19 @@ public partial class XRWorkloadProbeSceneController : MonoBehaviour
 
     void SetQuestionnaireJumpSuppressed(bool suppress)
     {
+        // The experiment scenes use A for PAXSM acknowledgement/confirmation, so
+        // never hand that button back to locomotion while a full-scene lock is enabled.
+        if (!suppress && suppressAButtonJumpForEntireExperiment)
+            return;
+
         if (!suppress)
         {
-            for (int i = 0; i < _questionnaireDisabledJumpBehaviours.Count; i++)
-            {
-                Behaviour behaviour = _questionnaireDisabledJumpBehaviours[i];
-                if (behaviour != null)
-                    behaviour.enabled = true;
-            }
-            _questionnaireDisabledJumpBehaviours.Clear();
+            RestoreQuestionnaireJumpSuppression();
             return;
         }
+
+        if (_aButtonJumpBehavioursSuppressed)
+            return;
 
         _questionnaireDisabledJumpBehaviours.Clear();
         MonoBehaviour[] behaviours = FindObjectsOfType<MonoBehaviour>(true);
@@ -2499,7 +2524,13 @@ public partial class XRWorkloadProbeSceneController : MonoBehaviour
             string objectName = behaviour.gameObject.name;
             bool isJumpProvider = typeName.IndexOf("Jump", StringComparison.OrdinalIgnoreCase) >= 0 ||
                                   objectName.Equals("Jump", StringComparison.OrdinalIgnoreCase);
-            bool consumesPrimaryForPanelMovement = typeName.Equals("MoveKnobPlane", StringComparison.Ordinal);
+            // The source file is still named MoveKnobPlane.cs, but its active
+            // component class is DockRigCalibrateByA_XRDevice. Cover both names
+            // (and legacy DockRig variants) so a held A cannot reposition the
+            // questionnaire rig during any experiment scene.
+            bool consumesPrimaryForPanelMovement =
+                typeName.Equals("MoveKnobPlane", StringComparison.Ordinal) ||
+                typeName.IndexOf("DockRigCalibrate", StringComparison.OrdinalIgnoreCase) >= 0;
             if (!isJumpProvider && !consumesPrimaryForPanelMovement)
                 continue;
 
@@ -2507,8 +2538,23 @@ public partial class XRWorkloadProbeSceneController : MonoBehaviour
             _questionnaireDisabledJumpBehaviours.Add(behaviour);
         }
 
+        _aButtonJumpBehavioursSuppressed = true;
+
         Debug.Log($"[PAXSM Questionnaire] Disabled {_questionnaireDisabledJumpBehaviours.Count} " +
                   "A-button jump/panel-move behaviour(s) during questionnaire mode.", this);
+    }
+
+    void RestoreQuestionnaireJumpSuppression()
+    {
+        for (int i = 0; i < _questionnaireDisabledJumpBehaviours.Count; i++)
+        {
+            Behaviour behaviour = _questionnaireDisabledJumpBehaviours[i];
+            if (behaviour != null)
+                behaviour.enabled = true;
+        }
+
+        _questionnaireDisabledJumpBehaviours.Clear();
+        _aButtonJumpBehavioursSuppressed = false;
     }
 
     TlxItem[] BuildTlxItems()
@@ -4465,7 +4511,7 @@ public partial class XRWorkloadProbeSceneController : MonoBehaviour
 
     protected virtual void OnDisable()
     {
-        SetQuestionnaireJumpSuppressed(false);
+        RestoreQuestionnaireJumpSuppression();
     }
 
     void WriteCsvFiles(string reason)

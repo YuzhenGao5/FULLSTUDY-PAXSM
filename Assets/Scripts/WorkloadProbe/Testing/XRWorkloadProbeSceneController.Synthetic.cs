@@ -19,6 +19,7 @@ public partial class XRWorkloadProbeSceneController
         public float twistDegrees;
         public bool grabStarted;
         public bool clickIssued;
+        public bool stallReported;
     }
 
     string _syntheticProbeTrialKey = "";
@@ -32,6 +33,7 @@ public partial class XRWorkloadProbeSceneController
     float _syntheticReadDelay;
 
     SyntheticQuestionnaireState _syntheticQuestionnaire;
+    int _syntheticQuestionnaireTargetOverride = -1;
 
     bool SyntheticParticipantActive => CAREXRSyntheticParticipantRuntime.Active;
 
@@ -185,16 +187,25 @@ public partial class XRWorkloadProbeSceneController
         int scale,
         bool pointAndClick)
     {
-        if (!SyntheticParticipantActive || record == null)
+        if (!SyntheticParticipantActive)
+            return;
+
+        int target = _syntheticQuestionnaireTargetOverride > 0
+            ? Mathf.Clamp(_syntheticQuestionnaireTargetOverride, 1, Mathf.Max(1, scale))
+            : (record != null ? SyntheticQuestionnaireTarget(record, stageName, scale) : -1);
+        _syntheticQuestionnaireTargetOverride = -1;
+        if (target < 1)
             return;
 
         var state = new SyntheticQuestionnaireState
         {
-            key = $"{record.blockId}:{record.itemIndex}:{record.itemId}:{stageName}",
+            key = record != null
+                ? $"{record.blockId}:{record.itemIndex}:{record.itemId}:{stageName}"
+                : $"practice:{stageName}:{Time.frameCount}",
             startRealtime = Time.realtimeSinceStartup,
             pointAndClick = pointAndClick,
             scale = scale,
-            target = SyntheticQuestionnaireTarget(record, stageName, scale),
+            target = target,
             nextStepRealtime = Time.realtimeSinceStartup + 0.28f
         };
 
@@ -204,6 +215,14 @@ public partial class XRWorkloadProbeSceneController
         BuildSyntheticQuestionnairePath(start, state.target, scale, state.path);
         _syntheticQuestionnaire = state;
         CAREXRSyntheticParticipantRuntime.SetQuestionnaireState(false, 0f, false);
+        Debug.Log(
+            $"[CARE-XR Synthetic] Questionnaire stage {stageName}: start={start}, target={state.target}, " +
+            $"pathSteps={state.path.Count}, core={(_paxsmQuestionnaireKnobCore != null)}.");
+    }
+
+    void SetSyntheticQuestionnaireTargetOverride(int target)
+    {
+        _syntheticQuestionnaireTargetOverride = target;
     }
 
     void UpdateSyntheticKnobQuestionnaire()
@@ -215,6 +234,14 @@ public partial class XRWorkloadProbeSceneController
 
         float now = Time.realtimeSinceStartup;
         float elapsed = now - state.startRealtime;
+        if (!state.stallReported && elapsed >= 2.5f)
+        {
+            state.stallReported = true;
+            Debug.LogWarning(
+                $"[CARE-XR Synthetic] Questionnaire stage is taking longer than expected: " +
+                $"target={state.target}, pathIndex={state.pathIndex}/{state.path.Count}, " +
+                $"current={_paxsmQuestionnaireKnobCore.CurrentSlot}.");
+        }
         if (elapsed < 0.24f)
         {
             CAREXRSyntheticParticipantRuntime.SetQuestionnaireState(false, state.twistDegrees, false);

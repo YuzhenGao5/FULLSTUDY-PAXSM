@@ -211,6 +211,7 @@ MonoBehaviour:
   startAutomatically: 1
   writeCsvOnQuit: 1
   outputFolderName: XRCombinedProbe_Data
+  suppressAButtonJumpForEntireExperiment: 1
   requireParticipantConfirmationBetweenBlocks: 1
   interBlockConfirmationPrompt: Combined task 1 and its questionnaire are complete.
     When you are ready, press A on the right controller to begin combined task 2.

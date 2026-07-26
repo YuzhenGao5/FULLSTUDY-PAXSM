@@ -22,6 +22,7 @@ internal sealed class ContextualResponseRecord
     public double ProbeMatchRatio { get; set; }
     public string YEvidence { get; set; } = "";
     public string ScoreContext { get; set; } = "";
+    public string PluginId { get; set; } = "";
     public string PluginName { get; set; } = "";
     public string SourceQuestionnairePath { get; set; } = "";
     public string SourceCombinedMetricsPath { get; set; } = "";
@@ -308,6 +309,7 @@ internal sealed class ContextualEvidenceService
                 ProbeMatchRatio = probe.Ratio,
                 YEvidence = probe.Evidence,
                 ScoreContext = DescribeScoreContext(score, hasBaselineScore ? baselineScore : null, probe.Category),
+                PluginId = plugin.PluginId,
                 PluginName = plugin.PluginName,
                 SourceQuestionnairePath = questionnairePath,
                 SourceCombinedMetricsPath = combinedBlock.FilePath,
@@ -409,7 +411,7 @@ internal sealed class ContextualEvidenceService
 
         var evidence = new List<string>();
         if (fast) evidence.Add($"{stage} decision RT is below the participant's personal lower reference ({decisionRt:0.###} s).");
-        if (highSpeed) evidence.Add($"{stage} peak knob speed exceeds the participant's {speedDistanceBin} movement personal p90/reference threshold ({maxSpeed:0.###}).");
+        if (highSpeed) evidence.Add($"{stage} peak knob speed is {maxSpeed:0.###} deg/s, above the participant's {speedDistanceBin} movement personal reference threshold ({speedThreshold:0.###} deg/s).");
         if (directPath) evidence.Add($"{stage} path is direct (path ratio {pathRatio:0.###}).");
         if (lowCorrection) evidence.Add($"{stage} correction is at or below the participant's personal lower reference (reverse={reverses}, micro-adjust={microAdjustments}).");
         if (extraPath) evidence.Add($"{stage} path is longer than the personal reference ({pathRatio:0.###}).");
@@ -462,7 +464,7 @@ internal sealed class ContextualEvidenceService
         if (available == 0)
             return new ProbeMatchResult { Category = "none", Ratio = 0d, Evidence = string.Join(" ", evidence) };
         double ratio = matched / (double)available;
-        string category = matched >= 2 && ratio >= 0.67d
+        string category = matched >= 2 && ratio >= 2d / 3d
             ? "strong"
             : matched >= 1
                 ? "partial"
@@ -490,7 +492,7 @@ internal sealed class ContextualEvidenceService
         {
             "participantId", "sessionNumber", "blockId", "presentationOrder", "itemId", "itemDimension",
             "selectedScore", "confidence", "baselineScore", "xPattern", "xEvidence", "confidencePattern",
-            "yPattern", "probeMatchRatio", "yEvidence", "scoreContext", "pluginName",
+            "yPattern", "probeMatchRatio", "yEvidence", "scoreContext", "pluginId", "pluginName",
             "sourceQuestionnairePath", "sourceCombinedMetricsPath", "sourceBaselineMetricsPath", "sourceResponseProfilePath"
         };
         var builder = new StringBuilder(string.Join(",", header));
@@ -515,6 +517,7 @@ internal sealed class ContextualEvidenceService
                 record.ProbeMatchRatio.ToString("0.###", CultureInfo.InvariantCulture),
                 CsvTable.Escape(record.YEvidence),
                 CsvTable.Escape(record.ScoreContext),
+                CsvTable.Escape(record.PluginId),
                 CsvTable.Escape(record.PluginName),
                 CsvTable.Escape(record.SourceQuestionnairePath),
                 CsvTable.Escape(record.SourceCombinedMetricsPath),

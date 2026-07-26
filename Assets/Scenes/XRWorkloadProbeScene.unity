@@ -1050,6 +1050,7 @@ MonoBehaviour:
   startAutomatically: 1
   writeCsvOnQuit: 1
   outputFolderName: XRWorkloadProbe_Data
+  suppressAButtonJumpForEntireExperiment: 1
   collectQuestionnaireBetweenBlocks: 1
   useMainSceneKnobRig: 1
   questionnaireInputMethod: 0

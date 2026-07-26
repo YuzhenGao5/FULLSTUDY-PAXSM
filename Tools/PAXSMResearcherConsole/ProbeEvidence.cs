@@ -356,6 +356,8 @@ internal sealed class ProbeCalibrationReader
                 continue;
             blocks[block.BlockId] = block;
         }
+
+        AddBlockSummaryMetrics(runDirectory, participantId, blocks);
         return blocks;
     }
 
@@ -391,6 +393,12 @@ internal sealed class ProbeCalibrationReader
                 };
             }
 
+            int recordedTrials = first.GetInt("recordedTrials");
+            AddPerTrialMetric(metrics, "GestureDistance", "GestureDistancePerTrial", "Gesture Distance per Trial", "m/trial", recordedTrials);
+            AddPerTrialMetric(metrics, "RayMovementDistance", "RayMovementDistancePerTrial", "Ray Movement Distance per Trial", "m/trial", recordedTrials);
+            AddPerTrialMetric(metrics, "HeadMovement", "HeadMovementPerTrial", "Head Movement per Trial", "m/trial", recordedTrials);
+            AddPerTrialMetric(metrics, "HeadRotation", "HeadRotationPerTrial", "Head Rotation per Trial", "deg/trial", recordedTrials);
+
             return new ProbeMetricBlock
             {
                 BlockId = blockId,
@@ -403,6 +411,114 @@ internal sealed class ProbeCalibrationReader
         {
             return null;
         }
+    }
+
+    /// <summary>
+    /// Adds trial-normalised metrics from the block summary. Calibration has eight
+    /// Baseline trials and ten demand trials, so totals alone would be misleading.
+    /// </summary>
+    private static void AddBlockSummaryMetrics(
+        string runDirectory,
+        string participantId,
+        Dictionary<string, ProbeMetricBlock> blocks)
+    {
+        FileInfo? summary = Directory.EnumerateFiles(runDirectory, "WorkloadProbe_Blocks_*_completed.csv", SearchOption.AllDirectories)
+            .Select(path => new FileInfo(path))
+            .OrderByDescending(file => file.LastWriteTimeUtc)
+            .FirstOrDefault();
+        if (summary == null)
+            return;
+
+        try
+        {
+            CsvTable table = CsvTable.Read(summary.FullName);
+            foreach (CsvRecord row in table.Records)
+            {
+                if (!string.IsNullOrWhiteSpace(participantId) &&
+                    !row.Get("participantId").Equals(participantId, StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                string blockId = row.Get("blockId");
+                int trials = row.GetInt("trials");
+                if (string.IsNullOrWhiteSpace(blockId) || trials <= 0 ||
+                    !blocks.TryGetValue(blockId, out ProbeMetricBlock? block))
+                    continue;
+
+                var metrics = new Dictionary<string, ProbeMetricValue>(block.Metrics, StringComparer.OrdinalIgnoreCase);
+                AddSummaryMetric(metrics, "MeanDecisionRt", "Mean Decision Time", "s/trial", row.GetDouble("meanDecisionRt"));
+                AddSummaryRate(metrics, "PauseRate", "Pause Rate", "pauses/trial", row.GetDouble("totalPauseCount"), trials);
+                AddSummaryRate(metrics, "HoverChangeRate", "Hover Change Rate", "changes/trial", row.GetDouble("totalHoverChangeCount"), trials);
+                AddSummaryRate(metrics, "TimeoutRate", "Timeout Rate", "timeouts/trial", row.GetDouble("timeoutCount"), trials);
+
+                blocks[blockId] = new ProbeMetricBlock
+                {
+                    BlockId = block.BlockId,
+                    TargetDimension = block.TargetDimension,
+                    FilePath = block.FilePath,
+                    Metrics = metrics
+                };
+            }
+        }
+        catch
+        {
+            // Metrics remain available even if a matching summary CSV is absent or malformed.
+        }
+    }
+
+    private static void AddPerTrialMetric(
+        Dictionary<string, ProbeMetricValue> metrics,
+        string sourceMetricId,
+        string derivedMetricId,
+        string derivedMetricName,
+        string unit,
+        int trialCount)
+    {
+        if (trialCount <= 0 || !metrics.TryGetValue(sourceMetricId, out ProbeMetricValue? source) ||
+            !source.Valid || double.IsNaN(source.Value) || double.IsInfinity(source.Value))
+            return;
+
+        metrics[derivedMetricId] = new ProbeMetricValue
+        {
+            MetricId = derivedMetricId,
+            MetricName = derivedMetricName,
+            Unit = unit,
+            Value = source.Value / trialCount,
+            Valid = true
+        };
+    }
+
+    private static void AddSummaryMetric(
+        Dictionary<string, ProbeMetricValue> metrics,
+        string metricId,
+        string metricName,
+        string unit,
+        double value)
+    {
+        if (double.IsNaN(value) || double.IsInfinity(value) || value < 0d)
+            return;
+
+        metrics[metricId] = new ProbeMetricValue
+        {
+            MetricId = metricId,
+            MetricName = metricName,
+            Unit = unit,
+            Value = value,
+            Valid = true
+        };
+    }
+
+    private static void AddSummaryRate(
+        Dictionary<string, ProbeMetricValue> metrics,
+        string metricId,
+        string metricName,
+        string unit,
+        double total,
+        int trialCount)
+    {
+        if (trialCount <= 0 || double.IsNaN(total) || double.IsInfinity(total) || total < 0d)
+            return;
+
+        AddSummaryMetric(metrics, metricId, metricName, unit, total / trialCount);
     }
 
     private static double Median(IEnumerable<double> source)

@@ -100,7 +100,7 @@ internal sealed class MainForm : Form
         BackColor = Page;
         ForeColor = Ink;
         Font = new Font("Segoe UI", 10F, FontStyle.Regular, GraphicsUnit.Point);
-        AutoScaleMode = AutoScaleMode.None;
+        AutoScaleMode = AutoScaleMode.Dpi;
 
         BuildEntryView();
         BuildConsoleView();
@@ -118,18 +118,8 @@ internal sealed class MainForm : Form
             return;
         _initialDpiLayoutApplied = true;
 
-        float scale = Math.Max(1f, DeviceDpi / 96f);
-        if (scale > 1.001f)
-        {
-            SuspendLayout();
-            Scale(new SizeF(scale, scale));
-            foreach (ColumnHeader column in _fileList.Columns)
-                column.Width = (int)Math.Round(column.Width * scale);
-            ResumeLayout(true);
-        }
-
         Rectangle workingArea = Screen.FromControl(this).WorkingArea;
-        int screenMargin = Math.Max(12, (int)Math.Round(16 * scale));
+        int screenMargin = Math.Max(12, DeviceDpi / 6);
         int maximumWidth = Math.Max(960, workingArea.Width - screenMargin * 2);
         int maximumHeight = Math.Max(640, workingArea.Height - screenMargin * 2);
         MinimumSize = new Size(
@@ -578,7 +568,7 @@ internal sealed class MainForm : Form
         _profileTitle.Size = new Size(520, 24);
         gate.Controls.Add(_profileTitle);
         _profileDetail = CreateLabel(
-            "A ready personal knob profile, Baseline plus three demand-probe calibration blocks, and a selected Probe Plugin are required before the calibration bundle can be frozen.",
+            "A ready personal knob profile, Baseline plus three demand-probe calibration blocks, and a Probe Plugin with at least one calibrated dimension are required before the calibration bundle can be frozen.",
             9F,
             Muted);
         _profileDetail.Location = new Point(18, 44);
@@ -960,9 +950,12 @@ internal sealed class MainForm : Form
             SetStatus("Start a participant session and complete a Probe calibration run before building a Plugin.", Warning);
             return;
         }
+        string previousPluginId = _activeProbePlugin.PluginId;
         using var dialog = new ProbeDefinitionDialog(_project, _session, _snapshot);
         dialog.ShowDialog(this);
         RefreshProbePluginSummary();
+        if (!string.Equals(previousPluginId, _activeProbePlugin.PluginId, StringComparison.OrdinalIgnoreCase))
+            InvalidateContextualRecord("The active Probe Plugin changed. Build a new contextual record before reviewing the matrix.");
         UpdateEvidenceMatrixStatus();
     }
 
@@ -972,8 +965,11 @@ internal sealed class MainForm : Form
             _probePluginList.SelectedItems[0].Tag is not ProbePluginFile plugin ||
             string.IsNullOrWhiteSpace(plugin.FilePath))
             return;
+        string previousPluginId = _activeProbePlugin.PluginId;
         ProbeRuleCardStore.SetActive(_session.OutputRoot, plugin.FilePath);
         RefreshProbePluginSummary();
+        if (!string.Equals(previousPluginId, _activeProbePlugin.PluginId, StringComparison.OrdinalIgnoreCase))
+            InvalidateContextualRecord("The selected Probe Plugin changed. Build a new contextual record before reviewing the matrix.");
         UpdateEvidenceMatrixStatus();
         SetStatus($"Selected Probe Plugin: {_activeProbePlugin.PluginName}", Success);
     }
@@ -1047,7 +1043,7 @@ internal sealed class MainForm : Form
         };
         _matrixDimensionFilter.Items.AddRange(new object[]
         {
-            "Mental Demand", "Physical Demand"
+            "Mental Demand", "Physical Demand", "Temporal Demand"
         });
         _matrixDimensionFilter.SelectedIndex = 0;
         _matrixDimensionFilter.SelectedIndexChanged += (_, _) => UpdateEvidenceMatrixStatus();
@@ -1084,11 +1080,18 @@ internal sealed class MainForm : Form
         matrixBoundary.Size = new Size(920, 24);
         card.Controls.Add(matrixBoundary);
 
-        TableLayoutPanel matrix = new()
+        Panel matrixViewport = new()
         {
             Location = new Point(22, 82),
             Size = new Size(1016, 250),
             Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
+            BackColor = Line
+        };
+        card.Controls.Add(matrixViewport);
+
+        TableLayoutPanel matrix = new()
+        {
+            Dock = DockStyle.Fill,
             ColumnCount = 4,
             RowCount = 4,
             BackColor = Line,
@@ -1102,16 +1105,15 @@ internal sealed class MainForm : Form
         matrix.RowStyles.Add(new RowStyle(SizeType.Percent, 33.33F));
         matrix.RowStyles.Add(new RowStyle(SizeType.Percent, 33.33F));
         matrix.RowStyles.Add(new RowStyle(SizeType.Percent, 33.34F));
-        card.Controls.Add(matrix);
-        card.Resize += (_, _) => matrix.Width = Math.Max(760, card.ClientSize.Width - 44);
+        matrixViewport.Controls.Add(matrix);
 
-        AddMatrixHeader(matrix, "Y: Selected Probe Plugin", 0, 0);
-        AddMatrixHeader(matrix, "X: Matches rapid /\ndirect pattern", 1, 0);
-        AddMatrixHeader(matrix, "X: No dominant\nresponse pattern", 2, 0);
-        AddMatrixHeader(matrix, "X: Matches hesitant /\ncorrective pattern", 3, 0);
-        AddMatrixRowHeader(matrix, "Y: Strong\nProbe-pattern match", 0, 1);
-        AddMatrixRowHeader(matrix, "Y: Partial\nProbe-pattern match", 0, 2);
-        AddMatrixRowHeader(matrix, "Y: No match /\ninsufficient evidence", 0, 3);
+        AddMatrixHeader(matrix, "Probe match (Y)", 0, 0);
+        AddMatrixHeader(matrix, "Rapid / direct", 1, 0);
+        AddMatrixHeader(matrix, "No dominant pattern", 2, 0);
+        AddMatrixHeader(matrix, "Hesitant / corrective", 3, 0);
+        AddMatrixRowHeader(matrix, "Strong match", 0, 1);
+        AddMatrixRowHeader(matrix, "Partial match", 0, 2);
+        AddMatrixRowHeader(matrix, "No match", 0, 3);
         for (int row = 1; row <= 3; row++)
         {
             for (int column = 1; column <= 3; column++)
@@ -1206,7 +1208,18 @@ internal sealed class MainForm : Form
             _buildEvidenceButton.Enabled = personalReady && probeReady && pluginReady;
         if (_contextualRecords.Count > 0)
         {
-            _matrixStatus.Text = $"{dimension}: {_contextualRecords.Count} contextual records are loaded. Select a matrix cell to inspect its evidence.";
+            bool recordMatchesActivePlugin = _contextualRecords.All(record =>
+                !string.IsNullOrWhiteSpace(record.PluginId)
+                    ? record.PluginId.Equals(_activeProbePlugin.PluginId, StringComparison.OrdinalIgnoreCase)
+                    : record.PluginName.Equals(_activeProbePlugin.PluginName, StringComparison.OrdinalIgnoreCase));
+            if (!recordMatchesActivePlugin)
+            {
+                _matrixStatus.Text = "The loaded contextual record was built with a different Probe Plugin. Rebuild it before reviewing the matrix.";
+                ResetMatrixCells("Rebuild with selected\nProbe Plugin");
+                return;
+            }
+
+            _matrixStatus.Text = $"{dimension}: {_contextualRecords.Count} contextual records loaded from '{_activeProbePlugin.PluginName}'. Select a matrix cell to inspect its evidence.";
             PopulateEvidenceMatrix();
             return;
         }
@@ -1241,7 +1254,7 @@ internal sealed class MainForm : Form
         }
 
         _contextualRecords = result.Records;
-        _matrixDetail.Text = $"Derived record written to:\r\n{result.OutputPath}\r\n\r\n{result.Message}\r\n\r\nSelect a populated matrix cell to inspect item-level X and Y evidence.";
+        _matrixDetail.Text = $"Derived record written to:\r\n{result.OutputPath}\r\n\r\n{result.Message}\r\nPlugin: {_activeProbePlugin.PluginName}\r\n\r\nSelect a populated matrix cell to inspect item-level X and Y evidence.";
         SetStatus(result.Message, Success);
         UpdateEvidenceMatrixStatus();
     }
@@ -1271,11 +1284,19 @@ internal sealed class MainForm : Form
                 2 => Color.FromArgb(250, 244, 226),
                 _ => Color.FromArgb(245, 238, 238)
             };
-            cell.Text = string.Join("\n", records.Take(3).Select(record =>
-                $"{record.BlockId}: {record.ItemId}\nscore {record.SelectedScore}; conf {record.Confidence}"));
+            cell.Text = string.Join("\n", records.Take(3).Select(CompactMatrixLabel));
             if (records.Count > 3)
                 cell.Text += $"\n+ {records.Count - 3} more";
         }
+    }
+
+    private static string CompactMatrixLabel(ContextualResponseRecord record)
+    {
+        const string repeatPrefix = "combined_high_repeat_";
+        string block = record.BlockId.StartsWith(repeatPrefix, StringComparison.OrdinalIgnoreCase)
+            ? $"R{record.BlockId[repeatPrefix.Length..]}"
+            : record.BlockId;
+        return $"{block} · score {record.SelectedScore}";
     }
 
     private void ResetMatrixCells(string text)
@@ -1297,6 +1318,7 @@ internal sealed class MainForm : Form
         foreach (ContextualResponseRecord record in records)
         {
             builder.AppendLine($"Item: {record.ItemId} ({record.ItemDimension}) / block: {record.BlockId}");
+            builder.AppendLine($"Probe Plugin: {record.PluginName} [{record.PluginId}]");
             builder.AppendLine($"Rating: {record.SelectedScore}; Confidence: {record.Confidence}; Baseline rating: {(record.BaselineScore?.ToString("0.###") ?? "not available")}");
             builder.AppendLine($"X / Answer pattern: {record.XPattern}");
             builder.AppendLine($"X evidence: {record.XEvidence}");
@@ -1326,6 +1348,14 @@ internal sealed class MainForm : Form
         "partial" => 2,
         _ => 3
     };
+
+    private void InvalidateContextualRecord(string message)
+    {
+        _contextualRecords = Array.Empty<ContextualResponseRecord>();
+        if (_matrixDetail != null)
+            _matrixDetail.Text = message;
+        ResetMatrixCells("Rebuild with selected\nProbe Plugin");
+    }
 
     private void AddSceneRow(Panel parent, SceneDefinition scene, int top, bool primary)
     {
@@ -1451,7 +1481,7 @@ internal sealed class MainForm : Form
             return;
         if (scene == SceneDefinitions.Combined && !WorkflowCalibrationReady())
         {
-            SetStatus("Combined remains locked until the personal knob profile, Baseline plus three demand-probe blocks, and a selected Probe Plugin are ready.", Warning);
+            SetStatus("Combined remains locked until the personal knob profile, Baseline plus three demand-probe blocks, and a Probe Plugin with at least one calibrated dimension are ready.", Warning);
             return;
         }
 
@@ -1606,7 +1636,7 @@ internal sealed class MainForm : Form
         if (WorkflowCalibrationReady())
         {
             _profileTitle.Text = "Calibration bundle · ready to freeze";
-            _profileDetail.Text = personalProfileState + " Baseline plus three demand-probe blocks and a selected Probe Plugin are ready.";
+            _profileDetail.Text = personalProfileState + " Baseline plus three demand-probe blocks and a Probe Plugin with calibrated dimensions are ready.";
             _freezeProfileButton.Enabled = true;
         }
         else
@@ -1896,7 +1926,7 @@ internal sealed class MainForm : Form
         _pipelineBadge.Text = "Pipeline ready";
         _calibrationProgress.Text = "0 / 4 collected";
         _profileTitle.Text = "Calibration bundle · unavailable";
-        _profileDetail.Text = "A personal knob profile, Baseline plus three demand-probe blocks, and a selected Probe Plugin are required before this bundle can be frozen.";
+        _profileDetail.Text = "A personal knob profile, Baseline plus three demand-probe blocks, and a Probe Plugin with at least one calibrated dimension are required before this bundle can be frozen.";
         _freezeProfileButton.Enabled = false;
         _combinedLaunchButton.Enabled = false;
         _combinedLaunchButton.Text = "Requires calibration";
@@ -1974,9 +2004,7 @@ internal sealed class MainForm : Form
     private bool WorkflowCalibrationReady()
     {
         return (_snapshot?.CalibrationBundleReady ?? false) &&
-               _activeProbePlugin.Find(ProbeDimensionCatalog.Mental.Id) is { Features.Count: > 0 } &&
-               _activeProbePlugin.Find(ProbeDimensionCatalog.Physical.Id) is { Features.Count: > 0 } &&
-               _activeProbePlugin.Find(ProbeDimensionCatalog.Temporal.Id) is { Features.Count: > 0 };
+               _activeProbePlugin.Dimensions.Any(card => card.Features.Count > 0);
     }
 
     private static Panel CreateCard()

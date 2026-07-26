@@ -1,0 +1,144 @@
+{
+  "SchemaVersion": "CAREXR_ProbePlugin_v1",
+  "PluginId": "demo-cf863028ff36486aaa56e48255304328",
+  "PluginName": "DEMO ONLY - P999999 target-selection workload probe v0",
+  "TaskFamily": "Colour-and-shape target-selection workload task",
+  "CalibrationParticipantCount": 1,
+  "PluginPurpose": "Synthetic pipeline demonstration of Evidence Matrix Y-axis matching.",
+  "UpdatedAtUtc": "2026-07-25T02:33:15.883151+00:00",
+  "BoundaryNote": "SYNTHETIC TEST DATA ONLY. This one-person provisional rule card demonstrates the data structure and must not be used as a study-level task probe or cognitive-state label.",
+  "CalibrationSources": [
+    {
+      "ParticipantId": "P999999",
+      "RunDirectory": "C:\\Users\\ygao930\\OneDrive - The University of Auckland\\Desktop\\CARE-XR Data\\P999999\\20260725T021356Z_5db20d\\workload-probe\\XRWorkloadProbe_Data",
+      "BaselineMetricsPath": "C:\\Users\\ygao930\\OneDrive - The University of Auckland\\Desktop\\CARE-XR Data\\P999999\\20260725T021356Z_5db20d\\workload-probe\\XRWorkloadProbe_Data\\XRWorkloadProbe_Behavior_01_baseline_P999999_20260725_141357_Metrics.csv",
+      "MentalMetricsPath": "C:\\Users\\ygao930\\OneDrive - The University of Auckland\\Desktop\\CARE-XR Data\\P999999\\20260725T021356Z_5db20d\\workload-probe\\XRWorkloadProbe_Data\\XRWorkloadProbe_Behavior_03_cognitive_heavy_P999999_20260725_141357_Metrics.csv",
+      "PhysicalMetricsPath": "C:\\Users\\ygao930\\OneDrive - The University of Auckland\\Desktop\\CARE-XR Data\\P999999\\20260725T021356Z_5db20d\\workload-probe\\XRWorkloadProbe_Data\\XRWorkloadProbe_Behavior_04_physical_heavy_P999999_20260725_141357_Metrics.csv"
+    }
+  ],
+  "Dimensions": [
+    {
+      "DimensionId": "mental",
+      "DisplayName": "Mental Demand",
+      "CalibrationBlockId": "cognitive_heavy",
+      "CalibrationBlockName": "Mental-demand calibration",
+      "SourceParticipantId": "P999999",
+      "CalibrationRunDirectory": "C:\\Users\\ygao930\\OneDrive - The University of Auckland\\Desktop\\CARE-XR Data\\P999999\\20260725T021356Z_5db20d\\workload-probe\\XRWorkloadProbe_Data",
+      "BaselineMetricsPath": "C:\\Users\\ygao930\\OneDrive - The University of Auckland\\Desktop\\CARE-XR Data\\P999999\\20260725T021356Z_5db20d\\workload-probe\\XRWorkloadProbe_Data\\XRWorkloadProbe_Behavior_01_baseline_P999999_20260725_141357_Metrics.csv",
+      "ConditionMetricsPath": "C:\\Users\\ygao930\\OneDrive - The University of Auckland\\Desktop\\CARE-XR Data\\P999999\\20260725T021356Z_5db20d\\workload-probe\\XRWorkloadProbe_Data\\XRWorkloadProbe_Behavior_03_cognitive_heavy_P999999_20260725_141357_Metrics.csv",
+      "Scope": "synthetic_demo_only",
+      "CreatedAtUtc": "2026-07-25T02:33:15.881357+00:00",
+      "Features": [
+        {
+          "MetricId": "CompletionTime",
+          "MetricName": "Completion Time",
+          "Unit": "s",
+          "ExpectedDirection": "higher",
+          "CalibrationBaselineValue": 9.307567,
+          "CalibrationConditionValue": 16.74564,
+          "CalibrationDelta": 7.438073000000001
+        },
+        {
+          "MetricId": "RayMovementDistance",
+          "MetricName": "Ray Movement Distance",
+          "Unit": "m",
+          "ExpectedDirection": "higher",
+          "CalibrationBaselineValue": 7.288521,
+          "CalibrationConditionValue": 12.30961,
+          "CalibrationDelta": 5.021088999999999
+        },
+        {
+          "MetricId": "HeadDirectionEntropy",
+          "MetricName": "Head Direction Entropy",
+          "Unit": "bits",
+          "ExpectedDirection": "higher",
+          "CalibrationBaselineValue": 1.34877,
+          "CalibrationConditionValue": 1.403097,
+          "CalibrationDelta": 0.054327000000000014
+        }
+      ]
+    },
+    {
+      "DimensionId": "physical",
+      "DisplayName": "Physical Demand",
+      "CalibrationBlockId": "physical_heavy",
+      "CalibrationBlockName": "Physical-demand calibration",
+      "SourceParticipantId": "P999999",
+      "CalibrationRunDirectory": "C:\\Users\\ygao930\\OneDrive - The University of Auckland\\Desktop\\CARE-XR Data\\P999999\\20260725T021356Z_5db20d\\workload-probe\\XRWorkloadProbe_Data",
+      "BaselineMetricsPath": "C:\\Users\\ygao930\\OneDrive - The University of Auckland\\Desktop\\CARE-XR Data\\P999999\\20260725T021356Z_5db20d\\workload-probe\\XRWorkloadProbe_Data\\XRWorkloadProbe_Behavior_01_baseline_P999999_20260725_141357_Metrics.csv",
+      "ConditionMetricsPath": "C:\\Users\\ygao930\\OneDrive - The University of Auckland\\Desktop\\CARE-XR Data\\P999999\\20260725T021356Z_5db20d\\workload-probe\\XRWorkloadProbe_Data\\XRWorkloadProbe_Behavior_04_physical_heavy_P999999_20260725_141357_Metrics.csv",
+      "Scope": "synthetic_demo_only",
+      "CreatedAtUtc": "2026-07-25T02:33:15.882259+00:00",
+      "Features": [
+        {
+          "MetricId": "GestureDistance",
+          "MetricName": "Gesture Distance",
+          "Unit": "m",
+          "ExpectedDirection": "higher",
+          "CalibrationBaselineValue": 4.123368,
+          "CalibrationConditionValue": 5.201453,
+          "CalibrationDelta": 1.0780849999999997
+        },
+        {
+          "MetricId": "HeadRotation",
+          "MetricName": "Head Rotation",
+          "Unit": "deg",
+          "ExpectedDirection": "higher",
+          "CalibrationBaselineValue": 111.8157,
+          "CalibrationConditionValue": 137.0286,
+          "CalibrationDelta": 25.212900000000005
+        },
+        {
+          "MetricId": "HeadDistance",
+          "MetricName": "Head Distance",
+          "Unit": "m",
+          "ExpectedDirection": "higher",
+          "CalibrationBaselineValue": 0.136011,
+          "CalibrationConditionValue": 0.231983,
+          "CalibrationDelta": 0.095972
+        }
+      ]
+    },
+    {
+      "DimensionId": "temporal",
+      "DisplayName": "Temporal Demand",
+      "CalibrationBlockId": "temporal_heavy",
+      "CalibrationBlockName": "Temporal-demand calibration",
+      "SourceParticipantId": "P999999",
+      "CalibrationRunDirectory": "C:\\Users\\ygao930\\OneDrive - The University of Auckland\\Desktop\\CARE-XR Data\\P999999\\20260725T021356Z_5db20d\\workload-probe\\XRWorkloadProbe_Data",
+      "BaselineMetricsPath": "C:\\Users\\ygao930\\OneDrive - The University of Auckland\\Desktop\\CARE-XR Data\\P999999\\20260725T021356Z_5db20d\\workload-probe\\XRWorkloadProbe_Data\\XRWorkloadProbe_Behavior_01_baseline_P999999_20260725_141357_Metrics.csv",
+      "ConditionMetricsPath": "C:\\Users\\ygao930\\OneDrive - The University of Auckland\\Desktop\\CARE-XR Data\\P999999\\20260725T021356Z_5db20d\\workload-probe\\XRWorkloadProbe_Data\\XRWorkloadProbe_Behavior_02_temporal_heavy_P999999_20260725_141357_Metrics.csv",
+      "Scope": "synthetic_demo_only",
+      "CreatedAtUtc": "2026-07-25T02:33:15.883120+00:00",
+      "Features": [
+        {
+          "MetricId": "CompletionTime",
+          "MetricName": "Completion Time",
+          "Unit": "s",
+          "ExpectedDirection": "higher",
+          "CalibrationBaselineValue": 9.307567,
+          "CalibrationConditionValue": 15.25374,
+          "CalibrationDelta": 5.946173
+        },
+        {
+          "MetricId": "ErrorRate",
+          "MetricName": "Error Rate",
+          "Unit": "proportion",
+          "ExpectedDirection": "higher",
+          "CalibrationBaselineValue": 0.125,
+          "CalibrationConditionValue": 0.4,
+          "CalibrationDelta": 0.275
+        },
+        {
+          "MetricId": "ResponseSpeed",
+          "MetricName": "Response Speed",
+          "Unit": "responses/s",
+          "ExpectedDirection": "lower",
+          "CalibrationBaselineValue": 1.303294,
+          "CalibrationConditionValue": 0.894047,
+          "CalibrationDelta": -0.4092469999999999
+        }
+      ]
+    }
+  ]
+}

@@ -185,6 +185,7 @@ MonoBehaviour:
   startAutomatically: 1
   writeCsvOnQuit: 1
   outputFolderName: PAXSMComparison_Data
+  suppressAButtonJumpForEntireExperiment: 1
   collectQuestionnaireBetweenBlocks: 1
   useMainSceneKnobRig: 1
   paxsmKnobRigPrefab: {fileID: 0}
