@@ -1479,9 +1479,9 @@ internal sealed class MainForm : Form
     {
         if (_session == null)
             return;
-        if (scene == SceneDefinitions.Combined && !WorkflowCalibrationReady())
+        if (scene == SceneDefinitions.Combined && !CombinedLaunchReady())
         {
-            SetStatus("Combined remains locked until the personal knob profile, Baseline plus three demand-probe blocks, and a Probe Plugin with at least one calibrated dimension are ready.", Warning);
+            SetStatus("Combined remains locked until the personal knob profile and Baseline plus three demand-probe blocks are ready.", Warning);
             return;
         }
 
@@ -1646,8 +1646,8 @@ internal sealed class MainForm : Form
             _freezeProfileButton.Enabled = false;
         }
 
-        _combinedLaunchButton.Enabled = WorkflowCalibrationReady();
-        _combinedLaunchButton.Text = WorkflowCalibrationReady() ? "Launch scene" : "Requires calibration";
+        _combinedLaunchButton.Enabled = CombinedLaunchReady();
+        _combinedLaunchButton.Text = CombinedLaunchReady() ? "Launch scene" : "Requires calibration";
         _dataFileCount.Text = (snapshot.CsvFileCount + snapshot.JsonFileCount).ToString();
         _dataRunCount.Text = snapshot.Runs.Count.ToString();
         _dataLatest.Text = snapshot.LatestWriteUtc.HasValue
@@ -2001,9 +2001,12 @@ internal sealed class MainForm : Form
         return row;
     }
 
+    // A Probe Plugin interprets completed data; it must not block collection of a held-out Combined run.
+    private bool CombinedLaunchReady() => _snapshot?.CalibrationBundleReady ?? false;
+
     private bool WorkflowCalibrationReady()
     {
-        return (_snapshot?.CalibrationBundleReady ?? false) &&
+        return CombinedLaunchReady() &&
                _activeProbePlugin.Dimensions.Any(card => card.Features.Count > 0);
     }
 
