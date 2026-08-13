@@ -46,7 +46,7 @@ internal sealed class StagePatternResult
 
 internal sealed class ProbeMatchResult
 {
-    public string Category { get; init; } = "none";
+    public string Category { get; init; } = "unresolved";
     public double Ratio { get; init; }
     public string Evidence { get; init; } = "";
 }
@@ -401,7 +401,7 @@ internal sealed class ContextualEvidenceService
 
         bool fast = IsPositiveThreshold(fastThreshold) && decisionRt >= 0d && decisionRt <= fastThreshold;
         bool highSpeed = IsPositiveThreshold(speedThreshold) && maxSpeed >= speedThreshold;
-        bool directPath = pathRatio >= 0.9d && pathRatio <= profile.DirectPathRatioMax;
+        bool directPath = pathRatio >= 1.0d && pathRatio <= profile.DirectPathRatioMax;
         bool lowCorrection = IsNonNegativeThreshold(lowCorrectionThreshold)
             ? correctionRate <= lowCorrectionThreshold + 0.000001d
             : reverses <= profile.LowCorrectionCountMax && microAdjustments <= profile.LowCorrectionCountMax;
@@ -437,8 +437,17 @@ internal sealed class ContextualEvidenceService
         ProbeMetricBlock combined)
     {
         int matched = 0;
-        int available = 0;
+        int retained = rule.Features.Count;
         var evidence = new List<string>();
+        var missing = new List<string>();
+        if (retained == 0)
+            return new ProbeMatchResult
+            {
+                Category = "unresolved",
+                Ratio = double.NaN,
+                Evidence = "The declared task route retained no Probe behaviors."
+            };
+
         foreach (ProbeFeatureRule feature in rule.Features)
         {
             if (!baseline.Metrics.TryGetValue(feature.MetricId, out ProbeMetricValue? baselineMetric) ||
@@ -446,10 +455,10 @@ internal sealed class ContextualEvidenceService
                 !baselineMetric.Valid || !combinedMetric.Valid)
             {
                 evidence.Add($"{feature.MetricName}: unavailable in the participant's Baseline or Combined export.");
+                missing.Add(feature.MetricName);
                 continue;
             }
 
-            available++;
             double delta = combinedMetric.Value - baselineMetric.Value;
             double tolerance = Math.Max(Math.Abs(feature.CalibrationDelta) * 0.10d,
                 Math.Max(Math.Abs(baselineMetric.Value) * 0.03d, 0.001d));
@@ -461,15 +470,26 @@ internal sealed class ContextualEvidenceService
             evidence.Add($"{feature.MetricName}: {combinedMetric.Value:0.###} vs Baseline {baselineMetric.Value:0.###} ({observed}; expected {expected}).");
         }
 
-        if (available == 0)
-            return new ProbeMatchResult { Category = "none", Ratio = 0d, Evidence = string.Join(" ", evidence) };
-        double ratio = matched / (double)available;
-        string category = matched >= 2 && ratio >= 2d / 3d
-            ? "strong"
+        if (missing.Count > 0)
+            return new ProbeMatchResult
+            {
+                Category = "unresolved",
+                Ratio = double.NaN,
+                Evidence = $"Required retained Probe behavior unavailable: {string.Join(", ", missing)}. {string.Join(" ", evidence)}"
+            };
+
+        double ratio = matched / (double)retained;
+        string category = matched == retained
+            ? "all"
             : matched >= 1
-                ? "partial"
+                ? "some"
                 : "none";
-        return new ProbeMatchResult { Category = category, Ratio = ratio, Evidence = string.Join(" ", evidence) };
+        return new ProbeMatchResult
+        {
+            Category = category,
+            Ratio = ratio,
+            Evidence = $"Matched {matched}/{retained} retained directions. {string.Join(" ", evidence)}"
+        };
     }
 
     private static string DescribeScoreContext(int score, double? baselineScore, string probeCategory)
@@ -478,7 +498,7 @@ internal sealed class ContextualEvidenceService
             return "Baseline questionnaire score was not available; score-to-probe relation was not assessed.";
         double delta = score - baselineScore.Value;
         string scoreDirection = delta > 1d ? "higher" : delta < -1d ? "lower" : "similar";
-        if (probeCategory is "strong" or "partial")
+        if (probeCategory is "all" or "some")
             return $"Score is {scoreDirection} than the participant's Baseline ({baselineScore.Value:0.###}); this is shown after, not used to calculate, the Probe match.";
         return $"Score is {scoreDirection} than the participant's Baseline ({baselineScore.Value:0.###}); Probe evidence was insufficient or did not match.";
     }

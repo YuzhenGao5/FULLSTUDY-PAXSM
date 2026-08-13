@@ -55,6 +55,21 @@ __pycache__/
 # JavaScript package dependencies (including generated analysis workspaces)
 node_modules/
 
+# Local credentials and signing material
+.env
+.env.*
+!.env.example
+*.pem
+*.pfx
+*.key
+
+# Human-participant records: keep on approved restricted storage
+/CARE-XR Data/
+/restricted_data/
+/participant_data/
+/data/raw/
+/data/restricted/
+
 # OS files
 .DS_Store
 Thumbs.db
@@ -64,3 +79,19 @@ Desktop.ini
 ExportsCSV/
 AnalysisOutput/
 /ExperimentOutputs/
+/outputs/
+
+# Participant-linked derived exports (rebuild from restricted data)
+/analysis/chi_paper/defensible_outputs/
+/analysis/chi_paper/outputs/
+/analysis/chi_paper/workflow_synthesis_outputs/
+/analysis/chi_paper/lca_exploratory_outputs/
+/analysis/chi_paper/selected24_quality/
+/analysis/chi_paper/study2_selected24/**/*.csv
+/analysis/chi_paper/study2_selected24/**/*.json
+
+# Rebuildable row-level source-domain and legacy pilot exports
+/analysis/chi_paper/mousechase_outputs/mousechase_records_with_weak_labels.csv
+/analysis/chi_paper/mousechase_outputs/mousechase_respondent_weak_labels.csv
+/analysis/chi_paper/mousechase_outputs/mousechase_out_of_fold_predictions.csv
+/response_process_adapter/outputs/pattern_explainer_gui/

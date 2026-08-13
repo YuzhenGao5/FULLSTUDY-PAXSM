@@ -1107,13 +1107,13 @@ internal sealed class MainForm : Form
         matrix.RowStyles.Add(new RowStyle(SizeType.Percent, 33.34F));
         matrixViewport.Controls.Add(matrix);
 
-        AddMatrixHeader(matrix, "Probe match (Y)", 0, 0);
-        AddMatrixHeader(matrix, "Rapid / direct", 1, 0);
+        AddMatrixHeader(matrix, "Task pattern (Y)", 0, 0);
+        AddMatrixHeader(matrix, "High-speed / direct", 1, 0);
         AddMatrixHeader(matrix, "No dominant pattern", 2, 0);
-        AddMatrixHeader(matrix, "Hesitant / corrective", 3, 0);
-        AddMatrixRowHeader(matrix, "Strong match", 0, 1);
-        AddMatrixRowHeader(matrix, "Partial match", 0, 2);
-        AddMatrixRowHeader(matrix, "No match", 0, 3);
+        AddMatrixHeader(matrix, "Extended / corrective", 3, 0);
+        AddMatrixRowHeader(matrix, "All directions matched", 0, 1);
+        AddMatrixRowHeader(matrix, "Some directions matched", 0, 2);
+        AddMatrixRowHeader(matrix, "No directions matched", 0, 3);
         for (int row = 1; row <= 3; row++)
         {
             for (int column = 1; column <= 3; column++)
@@ -1121,7 +1121,7 @@ internal sealed class MainForm : Form
         }
 
         Label footer = CreateLabel(
-            "A point groups an item by independently calculated X and Y evidence. Rating and confidence remain properties of the item; neither is used to calculate the matrix position.",
+            "A point groups an item by separately calculated X and Y descriptions. The rating and optional study fields remain properties of the Record; none determines the matrix position.",
             8.8F,
             Muted);
         footer.Location = new Point(22, 350);
@@ -1219,7 +1219,11 @@ internal sealed class MainForm : Form
                 return;
             }
 
-            _matrixStatus.Text = $"{dimension}: {_contextualRecords.Count} contextual records loaded from '{_activeProbePlugin.PluginName}'. Select a matrix cell to inspect its evidence.";
+            IEnumerable<ContextualResponseRecord> dimensionRecords = _contextualRecords.Where(record =>
+                ProbeDimensionCatalog.FromItemDimension(record.ItemDimension)?.Id == definition?.Id);
+            int resolvedCount = dimensionRecords.Count(record => record.YPattern is "all" or "some" or "none");
+            int unresolvedCount = dimensionRecords.Count(record => record.YPattern == "unresolved");
+            _matrixStatus.Text = $"{dimension}: {resolvedCount} resolved contextual records loaded from '{_activeProbePlugin.PluginName}'; {unresolvedCount} remain unresolved. Select a matrix cell to inspect its evidence.";
             PopulateEvidenceMatrix();
             return;
         }
@@ -1269,7 +1273,8 @@ internal sealed class MainForm : Form
             return;
 
         IEnumerable<ContextualResponseRecord> filtered = _contextualRecords.Where(record =>
-            ProbeDimensionCatalog.FromItemDimension(record.ItemDimension)?.Id == definition.Id);
+            ProbeDimensionCatalog.FromItemDimension(record.ItemDimension)?.Id == definition.Id &&
+            record.YPattern is "all" or "some" or "none");
         foreach (IGrouping<(int Row, int Column), ContextualResponseRecord> group in filtered.GroupBy(record =>
                      (MatrixRow(record.YPattern), MatrixColumn(record.XPattern))))
         {
@@ -1323,7 +1328,8 @@ internal sealed class MainForm : Form
             builder.AppendLine($"X / Answer pattern: {record.XPattern}");
             builder.AppendLine($"X evidence: {record.XEvidence}");
             builder.AppendLine($"Confidence-stage pattern: {record.ConfidencePattern}");
-            builder.AppendLine($"Y / Probe pattern match: {record.YPattern} ({record.ProbeMatchRatio:P0})");
+            string yRatio = double.IsNaN(record.ProbeMatchRatio) ? "not resolved" : record.ProbeMatchRatio.ToString("P0");
+            builder.AppendLine($"Y / task pattern: {DisplayYPattern(record.YPattern)} ({yRatio})");
             builder.AppendLine($"Y evidence: {record.YEvidence}");
             builder.AppendLine($"Score context: {record.ScoreContext}");
             builder.AppendLine($"Sources: questionnaire={record.SourceQuestionnairePath}");
@@ -1342,10 +1348,18 @@ internal sealed class MainForm : Form
         _ => 2
     };
 
+    private static string DisplayYPattern(string pattern) => pattern switch
+    {
+        "all" => "all retained directions matched",
+        "some" => "some retained directions matched",
+        "none" => "no retained directions matched",
+        _ => "unresolved"
+    };
+
     private static int MatrixRow(string pattern) => pattern switch
     {
-        "strong" => 1,
-        "partial" => 2,
+        "all" => 1,
+        "some" => 2,
         _ => 3
     };
 
