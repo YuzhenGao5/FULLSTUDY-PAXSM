@@ -4,6 +4,12 @@ This is an optional researcher-facing control and data-monitoring layer for the
 existing Unity experiment. Unity scenes remain the sole producers of raw task,
 questionnaire, probe, and behavior data.
 
+On Windows, launch the packaged, self-contained application with
+`Open_PAXSMResearcherConsole.bat` or
+`Launcher/PAXSMResearcherConsole.exe`. The packaged executable does not require
+a separate .NET installation and locates the Unity project from its repository
+location.
+
 The first version provides:
 
 - a mandatory participant/session gate;
